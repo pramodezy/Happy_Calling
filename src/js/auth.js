@@ -96,29 +96,34 @@ export async function loginWithEmail(identifier, password) {
   if (raw.includes("@")) {
     candidates.push(raw);
   } else {
-    // Support username format: 'cci_65', '65', 'BLR01', etc.
+    // Support username format: 'cci_1', '1', 'cci_65', '65', etc.
     const cleanCode = raw.toLowerCase().replace(/^(cci[_-]?)/i, "");
-    candidates.push(`cci_${cleanCode}@cci.local`);
-    candidates.push(`cci_${cleanCode}@happycalling.local`);
+    candidates.push(`cci_${cleanCode}@happycalling.in`);
     candidates.push(`cci_${cleanCode}@motorolacare.in`);
     candidates.push(`${cleanCode}@motorolacare.in`);
-    candidates.push(`${raw.toLowerCase()}@cci.local`);
+    candidates.push(`${cleanCode}@happycalling.in`);
+    candidates.push(`cci_${cleanCode}@cci.local`);
+    candidates.push(`${raw.toLowerCase()}@happycalling.in`);
   }
 
   let lastError = null;
   let authData = null;
 
   for (const candidateEmail of candidates) {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: candidateEmail,
-      password: password,
-    });
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: candidateEmail,
+        password: password,
+      });
 
-    if (!error && data?.user) {
-      authData = data;
-      break;
+      if (!error && data?.user) {
+        authData = data;
+        break;
+      }
+      lastError = error;
+    } catch (tryErr) {
+      lastError = tryErr;
     }
-    lastError = error;
   }
 
   if (!authData) {

@@ -501,7 +501,7 @@ BEGIN
 
             -- Username format: cci_<station_code> (e.g. cci_65)
             v_username := 'cci_' || lower(regexp_replace(v_code, '^cci_?', ''));
-            v_email := v_username || '@cci.local';
+            v_email := v_username || '@happycalling.in';
 
             -- 1. Upsert into cci_master
             INSERT INTO public.cci_master (cci_code, cci_name, region, location, status)
@@ -517,6 +517,7 @@ BEGIN
             -- 2. Check Auth User
             SELECT id INTO v_auth_id FROM auth.users 
             WHERE email = v_email 
+               OR email = v_username || '@cci.local'
                OR email = lower(v_code) || '@motorolacare.in' 
                OR email = v_username || '@motorolacare.in'
             LIMIT 1;
@@ -633,7 +634,7 @@ BEGIN
 
     SELECT auth_user_id INTO v_auth_id FROM public.user_profiles WHERE cci_code = v_clean_code LIMIT 1;
     IF v_auth_id IS NULL THEN
-        SELECT id INTO v_auth_id FROM auth.users WHERE email = v_username || '@cci.local' OR email = lower(v_clean_code) || '@motorolacare.in' LIMIT 1;
+        SELECT id INTO v_auth_id FROM auth.users WHERE email = v_username || '@happycalling.in' OR email = v_username || '@cci.local' OR email = lower(v_clean_code) || '@motorolacare.in' OR email = v_username || '@motorolacare.in' LIMIT 1;
     END IF;
 
     IF v_auth_id IS NULL THEN
@@ -790,7 +791,7 @@ GRANT EXECUTE ON FUNCTION public.admin_reset_cci_password(TEXT, TEXT) TO authent
 
             for (const st of parsedStations) {
               const username = `cci_${st.station_code.toLowerCase().replace(/^(cci[_-]?)/i, "")}`;
-              const email = `${username}@cci.local`;
+              const email = `${username}@happycalling.in`;
               try {
                 const { data: userData, error: createErr } = await adminClient.auth.admin.createUser({
                   email: email,
