@@ -207,6 +207,116 @@ serve(async (req) => {
         break;
       }
 
+      case "bulk_import_station_regions": {
+        const { stations, defaultPassword = "Moto@123" } = payload;
+        if (!Array.isArray(stations) || stations.length === 0) {
+          throw new Error("Stations array is required.");
+        }
+
+        let cciUpdated = 0;
+        let cciInserted = 0;
+        let usersCreated = 0;
+        let usersExisting = 0;
+        const errors = [];
+
+        for (const st of stations) {
+          const code = String(st.station_code || "").trim().toUpperCase();
+          const region = String(st.region || "General").trim();
+          const name = String(st.station_name || `Motorola Care - ${code}`).trim();
+          const location = String(st.location || region).trim();
+
+          if (!code) continue;
+
+          try {
+            // 1. Upsert into cci_master
+            const { data: existingCci } = await adminClient
+              .from("cci_master")
+              .select("id")
+              .eq("cci_code", code)
+              .maybeSingle();
+
+            if (existingCci) {
+              await adminClient
+                .from("cci_master")
+                .update({ region, cci_name: name, location, status: "ACTIVE", updated_at: new Date().toISOString() })
+                .eq("cci_code", code);
+              cciUpdated++;
+            } else {
+              await adminClient
+                .from("cci_master")
+                .insert({ cci_code: code, cci_name: name, region, location, status: "ACTIVE" });
+              cciInserted++;
+            }
+
+            // 2. Manage CCI User with default password Moto@123
+            const userEmail = `${code.toLowerCase()}@motorolacare.in`;
+            const userName = `CCI ${code}`;
+
+            // Check if user already exists in user_profiles
+            const { data: existingProfile } = await adminClient
+              .from("user_profiles")
+              .select("id, auth_user_id")
+              .eq("cci_code", code)
+              .maybeSingle();
+
+            if (!existingProfile) {
+              // Create user in Supabase Auth
+              const { data: newUser, error: createAuthErr } = await adminClient.auth.admin.createUser({
+                email: userEmail,
+                password: defaultPassword,
+                email_confirm: true,
+                user_metadata: { user_name: userName, role: "CCI_USER", cci_code: code },
+              });
+
+              if (createAuthErr) {
+                if (createAuthErr.message.includes("already registered")) {
+                  usersExisting++;
+                } else {
+                  throw createAuthErr;
+                }
+              } else if (newUser?.user) {
+                await adminClient.from("user_profiles").insert({
+                  auth_user_id: newUser.user.id,
+                  user_name: userName,
+                  role: "CCI_USER",
+                  cci_code: code,
+                  cci_name: name,
+                  status: "ACTIVE",
+                });
+                usersCreated++;
+              }
+            } else {
+              await adminClient
+                .from("user_profiles")
+                .update({ cci_name: name, status: "ACTIVE", updated_at: new Date().toISOString() })
+                .eq("id", existingProfile.id);
+              usersExisting++;
+            }
+          } catch (stErr: any) {
+            errors.push({ station_code: code, error: stErr.message || String(stErr) });
+          }
+        }
+
+        // Audit Log
+        await adminClient.from("audit_log").insert({
+          user_id: callerUser.id,
+          role: "ADMIN",
+          action: "REGION_MAPPING_IMPORT",
+          description: `Admin imported region mapping: ${cciInserted} CCIs created, ${cciUpdated} updated, ${usersCreated} CCI users created with default password.`,
+          metadata: { cciInserted, cciUpdated, usersCreated, usersExisting, errors },
+        });
+
+        result = {
+          success: true,
+          cciInserted,
+          cciUpdated,
+          usersCreated,
+          usersExisting,
+          errors,
+        };
+        break;
+      }
+
       default:
         return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), {
           status: 400,

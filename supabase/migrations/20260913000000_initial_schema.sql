@@ -1082,6 +1082,86 @@ BEGIN
 END;
 $$;
 
+-- 6.7 UPSERT STATION REGION MAPPING (RPC)
+-- Ingests Station Code to Region mappings and updates/inserts into cci_master
+CREATE OR REPLACE FUNCTION public.upsert_station_region_batch(
+    p_stations JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_item JSONB;
+    v_code TEXT;
+    v_region TEXT;
+    v_name TEXT;
+    v_location TEXT;
+    v_updated INT := 0;
+    v_inserted INT := 0;
+    v_exists BOOLEAN;
+BEGIN
+    IF NOT public.is_admin() THEN
+        RAISE EXCEPTION 'Forbidden: Admin access required';
+    END IF;
+
+    FOR v_item IN SELECT * FROM jsonb_array_elements(p_stations)
+    LOOP
+        v_code := UPPER(TRIM(v_item->>'station_code'));
+        v_region := TRIM(v_item->>'region');
+        v_name := TRIM(v_item->>'station_name');
+        v_location := TRIM(v_item->>'location');
+
+        IF v_code IS NOT NULL AND v_code <> '' THEN
+            IF v_region IS NULL OR v_region = '' THEN
+                v_region := 'General';
+            END IF;
+            IF v_name IS NULL OR v_name = '' THEN
+                v_name := 'Motorola Care - ' || v_code;
+            END IF;
+            IF v_location IS NULL OR v_location = '' THEN
+                v_location := v_region;
+            END IF;
+
+            SELECT EXISTS (SELECT 1 FROM public.cci_master WHERE cci_code = v_code) INTO v_exists;
+
+            IF v_exists THEN
+                UPDATE public.cci_master
+                SET region = v_region,
+                    cci_name = COALESCE(NULLIF(v_name, ''), cci_name),
+                    location = COALESCE(NULLIF(v_location, ''), location),
+                    status = 'ACTIVE',
+                    updated_at = now()
+                WHERE cci_code = v_code;
+                v_updated := v_updated + 1;
+            ELSE
+                INSERT INTO public.cci_master (cci_code, cci_name, region, location, status)
+                VALUES (v_code, v_name, v_region, v_location, 'ACTIVE');
+                v_inserted := v_inserted + 1;
+            END IF;
+        END IF;
+    END LOOP;
+
+    -- Log Audit
+    INSERT INTO public.audit_log (
+        user_id, role, action, description, metadata
+    ) VALUES (
+        auth.uid(),
+        'ADMIN',
+        'REGION_MAPPING_IMPORT',
+        format('Station Region Mapping batch processed: %s inserted, %s updated', v_inserted, v_updated),
+        jsonb_build_object('inserted', v_inserted, 'updated', v_updated)
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'inserted', v_inserted,
+        'updated', v_updated
+    );
+END;
+$$;
+
 -- ============================================================================
 -- 7. INITIAL SEED DATA (Default CCIs & Admin Seed Helper)
 -- ============================================================================

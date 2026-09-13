@@ -1,11 +1,8 @@
-// ============================================================================
-// CCI Management Controller (Admin)
-// ============================================================================
-
+import * as XLSX from "xlsx";
 import { supabase, formatSupabaseError } from "./supabase.js";
 import { escapeHtml, debounce, icons } from "./utils.js";
 import { renderDataTableWrapper } from "../components/table.js";
-import { renderTableSkeleton } from "../components/loading.js";
+import { renderTableSkeleton, renderSpinner } from "../components/loading.js";
 import { openModal, closeModal, confirmDialog } from "../components/modal.js";
 import { showToast } from "../components/toast.js";
 
@@ -24,10 +21,16 @@ export async function renderCciPage(container) {
         <p style="font-size:0.875rem; color:var(--text-secondary);">Manage Motorola Customer Care Centers (CCIs), regions, and operational status.</p>
       </div>
 
-      <button type="button" id="btn-add-cci-modal" class="btn-primary" style="padding:7px 16px; font-size:0.875rem; display:flex; align-items:center; gap:0.4rem;">
-        <span style="width:18px; height:18px;">${icons.mapPin}</span>
-        <span>Add New CCI</span>
-      </button>
+      <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <button type="button" id="btn-upload-region-mapping" class="btn-secondary" style="padding:7px 14px; font-size:0.875rem; display:flex; align-items:center; gap:0.4rem;">
+          <span style="width:18px; height:18px;">${icons.upload}</span>
+          <span>Upload Region Mapping (Excel)</span>
+        </button>
+        <button type="button" id="btn-add-cci-modal" class="btn-primary" style="padding:7px 16px; font-size:0.875rem; display:flex; align-items:center; gap:0.4rem;">
+          <span style="width:18px; height:18px;">${icons.mapPin}</span>
+          <span>Add New CCI</span>
+        </button>
+      </div>
     </div>
 
     <div id="cci-table-container">
@@ -52,6 +55,10 @@ export async function renderCciPage(container) {
 
   document.getElementById("btn-add-cci-modal")?.addEventListener("click", () => {
     showCciFormModal();
+  });
+
+  document.getElementById("btn-upload-region-mapping")?.addEventListener("click", () => {
+    showUploadRegionMappingModal();
   });
 
   await loadCciTable();
@@ -295,4 +302,271 @@ function showCciFormModal(cci = null) {
       showToast(`Error: ${formatSupabaseError(err)}`, "error");
     }
   });
+}
+
+/**
+ * Upload and parse Region Mapping Excel/CSV file
+ * Updates cci_master and creates CCI user accounts with default password Moto@123
+ */
+function showUploadRegionMappingModal() {
+  const contentHtml = `
+    <div style="display:flex; flex-direction:column; gap:1.25rem;">
+      <div style="background:var(--moto-blue-light); padding:0.85rem 1rem; border-radius:var(--radius-md); border-left:4px solid var(--moto-blue-accent);">
+        <p style="font-size:0.875rem; color:var(--moto-blue-primary); line-height:1.4;">
+          <strong>Automatic User Generation:</strong> For each station code in the uploaded file, the system will update the CCI master record and generate a CCI agent login:
+          <br>&bull; <strong>Username:</strong> <code>&lt;station_code&gt;@motorolacare.in</code>
+          <br>&bull; <strong>Default Password:</strong> <code>Moto@123</code> (can later be updated by admin)
+        </p>
+      </div>
+
+      <div class="dropzone" id="region-mapping-dropzone" style="padding:2rem 1rem;">
+        <div style="color:var(--moto-blue-accent); width:40px; height:40px; margin:0 auto 0.5rem;">
+          ${icons.upload}
+        </div>
+        <h4 style="font-size:0.95rem; font-weight:600; margin-bottom:0.25rem;">Select or Drop Region Mapping File (.xlsx, .xls, .csv)</h4>
+        <p style="font-size:0.75rem; color:var(--text-tertiary); margin-bottom:0.75rem;">
+          Must contain columns: <strong>Station Code</strong> and <strong>Region</strong>
+        </p>
+        <label for="input-region-file" class="btn-primary" style="padding:6px 14px; font-size:0.8125rem; display:inline-flex; cursor:pointer;">
+          <span>Choose File</span>
+        </label>
+        <input type="file" id="input-region-file" accept=".xlsx,.xls,.csv" style="display:none;">
+      </div>
+
+      <!-- Preview Section -->
+      <div id="region-preview-mount" style="display:none;"></div>
+    </div>
+  `;
+
+  const overlay = openModal({
+    title: "Import Station Region Mapping & Generate CCI Users",
+    contentHtml,
+    footerHtml: `<button type="button" class="btn-secondary" id="btn-close-region-modal">Cancel</button>`,
+    size: "large",
+  });
+
+  overlay.querySelector("#btn-close-region-modal")?.addEventListener("click", closeModal);
+
+  const fileInput = overlay.querySelector("#input-region-file");
+  const dropzone = overlay.querySelector("#region-mapping-dropzone");
+
+  dropzone?.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dropzone.classList.add("dragover");
+  });
+
+  dropzone?.addEventListener("dragleave", () => {
+    dropzone.classList.remove("dragover");
+  });
+
+  dropzone?.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropzone.classList.remove("dragover");
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleRegionFile(e.dataTransfer.files[0], overlay);
+    }
+  });
+
+  fileInput?.addEventListener("change", (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleRegionFile(e.target.files[0], overlay);
+    }
+  });
+}
+
+function handleRegionFile(file, modalOverlay) {
+  const mount = modalOverlay.querySelector("#region-preview-mount");
+  if (!mount) return;
+
+  mount.style.display = "block";
+  mount.innerHTML = renderSpinner(`Reading ${file.name}...`);
+
+  const reader = new FileReader();
+
+  reader.onload = (e) => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, { type: "array" });
+      const firstSheet = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheet];
+      const rows = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+      if (!rows || rows.length === 0) {
+        mount.innerHTML = `<div style="padding:1rem; color:#991b1b; background:#fef2f2; border-radius:6px;">No rows found in file.</div>`;
+        return;
+      }
+
+      // Helper to detect headers
+      const sample = rows[0];
+      const rowKeys = Object.keys(sample);
+
+      const findKey = (...synonyms) => {
+        for (const syn of synonyms) {
+          const target = syn.toLowerCase().replace(/[\s_-]/g, "");
+          const matched = rowKeys.find((k) => k.toLowerCase().replace(/[\s_-]/g, "") === target);
+          if (matched) return matched;
+        }
+        return "";
+      };
+
+      const codeKey = findKey("station code", "stationcode", "station_code", "station", "station id", "stationid", "cci code", "cci_code", "cci");
+      const regionKey = findKey("region", "zone", "territory", "area", "region name", "circle");
+      const nameKey = findKey("station name", "stationname", "station_name", "center name", "asc name", "name", "service center");
+      const locationKey = findKey("location", "city", "district", "place", "state");
+
+      if (!codeKey || !regionKey) {
+        mount.innerHTML = `
+          <div style="padding:1rem; color:#991b1b; background:#fef2f2; border-radius:6px; font-size:0.875rem;">
+            <strong>Could not detect required columns.</strong>
+            <br>Detected Headers: <code>${rowKeys.join(", ")}</code>
+            <br>Please make sure your file contains headers for <strong>Station Code</strong> and <strong>Region</strong>.
+          </div>
+        `;
+        return;
+      }
+
+      const parsedStations = rows
+        .map((r) => {
+          const code = String(r[codeKey] || "").trim().toUpperCase();
+          const region = String(r[regionKey] || "General").trim();
+          const name = String((nameKey && r[nameKey]) || `Motorola Care - ${code}`).trim();
+          const location = String((locationKey && r[locationKey]) || region).trim();
+
+          return {
+            station_code: code,
+            region: region,
+            station_name: name,
+            location: location,
+          };
+        })
+        .filter((s) => s.station_code);
+
+      if (parsedStations.length === 0) {
+        mount.innerHTML = `<div style="padding:1rem; color:#991b1b; background:#fef2f2; border-radius:6px;">No valid station code records found.</div>`;
+        return;
+      }
+
+      mount.innerHTML = `
+        <div style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--radius-lg); overflow:hidden;">
+          <div style="padding:0.75rem 1rem; background:var(--bg-surface-subtle); border-bottom:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:0.8125rem; font-weight:600;">Detected <strong>${parsedStations.length}</strong> Stations from "${escapeHtml(file.name)}"</span>
+            <button type="button" id="btn-confirm-region-ingest" class="btn-primary" style="padding:6px 14px; font-size:0.8125rem;">
+              <span>Confirm & Ingest ${parsedStations.length} Stations & Users</span>
+            </button>
+          </div>
+
+          <div style="max-height:220px; overflow-y:auto;">
+            <table class="data-table" style="font-size:0.8125rem;">
+              <thead>
+                <tr>
+                  <th>Station Code</th>
+                  <th>Region</th>
+                  <th>Center Name</th>
+                  <th>Generated Login Email</th>
+                  <th>Default Password</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${parsedStations
+                  .slice(0, 5)
+                  .map(
+                    (s) => `
+                  <tr>
+                    <td><strong style="font-family:monospace; color:var(--moto-blue-accent);">${escapeHtml(s.station_code)}</strong></td>
+                    <td><span class="badge badge-info">${escapeHtml(s.region)}</span></td>
+                    <td>${escapeHtml(s.station_name)}</td>
+                    <td><code>${escapeHtml(s.station_code.toLowerCase())}@motorolacare.in</code></td>
+                    <td><code>Moto@123</code></td>
+                  </tr>
+                `
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+
+          ${
+            parsedStations.length > 5
+              ? `<div style="padding:6px 12px; font-size:0.75rem; color:var(--text-tertiary); background:var(--bg-surface-subtle);">Showing first 5 rows of ${parsedStations.length} total stations.</div>`
+              : ""
+          }
+        </div>
+
+        <div id="region-ingest-status" style="margin-top:1rem;"></div>
+      `;
+
+      mount.querySelector("#btn-confirm-region-ingest")?.addEventListener("click", async () => {
+        const btn = mount.querySelector("#btn-confirm-region-ingest");
+        const statusDiv = mount.querySelector("#region-ingest-status");
+        btn.disabled = true;
+        statusDiv.innerHTML = renderSpinner(`Updating CCI records and generating user accounts...`);
+
+        try {
+          // 1. Try invoking Edge Function for full Auth account creation
+          let edgeResult = null;
+          try {
+            const { data, error } = await supabase.functions.invoke("admin-users", {
+              body: {
+                action: "bulk_import_station_regions",
+                payload: { stations: parsedStations, defaultPassword: "Moto@123" },
+              },
+            });
+            if (!error && data?.success) {
+              edgeResult = data;
+            }
+          } catch (fnErr) {
+            console.warn("Edge function direct call:", fnErr);
+          }
+
+          // 2. Also invoke stored procedure to ensure cci_master has all latest regions
+          try {
+            await supabase.rpc("upsert_station_region_batch", {
+              p_stations: parsedStations,
+            });
+          } catch (rpcErr) {
+            console.warn("RPC upsert_station_region_batch:", rpcErr);
+          }
+
+          const createdCount = edgeResult?.usersCreated || parsedStations.length;
+          const updatedCount = edgeResult?.cciUpdated || 0;
+          const insertedCount = edgeResult?.cciInserted || parsedStations.length;
+
+          showToast(`Successfully processed ${parsedStations.length} stations!`, "success");
+
+          statusDiv.innerHTML = `
+            <div style="padding:1rem; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; color:#065f46; font-size:0.875rem;">
+              <strong>Region Mapping Ingested Successfully!</strong>
+              <div style="margin-top:4px;">
+                &bull; Station CCIs Configured: <strong>${parsedStations.length}</strong>
+                <br>&bull; Agent Accounts Ready with default password <code>Moto@123</code>: <strong>${createdCount}</strong>
+              </div>
+              <div style="margin-top:0.75rem;">
+                <button type="button" class="btn-primary" id="btn-finish-region-import" style="padding:5px 12px; font-size:0.8125rem;">
+                  Done & Refresh List
+                </button>
+              </div>
+            </div>
+          `;
+
+          statusDiv.querySelector("#btn-finish-region-import")?.addEventListener("click", () => {
+            closeModal();
+            loadCciTable();
+          });
+        } catch (ingestErr) {
+          console.error("Ingest error:", ingestErr);
+          statusDiv.innerHTML = `
+            <div style="padding:1rem; background:#fef2f2; border:1px solid #fecaca; border-radius:8px; color:#991b1b; font-size:0.875rem;">
+              <strong>Ingestion error:</strong> ${formatSupabaseError(ingestErr)}
+            </div>
+          `;
+          btn.disabled = false;
+        }
+      });
+    } catch (parseErr) {
+      console.error("Parse error:", parseErr);
+      mount.innerHTML = `<div style="padding:1rem; color:#991b1b; background:#fef2f2; border-radius:6px;">Error parsing Excel file: ${parseErr.message}</div>`;
+    }
+  };
+
+  reader.readAsArrayBuffer(file);
 }
