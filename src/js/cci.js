@@ -502,47 +502,109 @@ function handleRegionFile(file, modalOverlay) {
         statusDiv.innerHTML = renderSpinner(`Updating CCI records and generating user accounts...`);
 
         try {
-          // 1. Try invoking Edge Function for full Auth account creation
-          let edgeResult = null;
-          try {
-            const { data, error } = await supabase.functions.invoke("admin-users", {
-              body: {
-                action: "bulk_import_station_regions",
-                payload: { stations: parsedStations, defaultPassword: "Moto@123" },
-              },
-            });
-            if (!error && data?.success) {
-              edgeResult = data;
-            }
-          } catch (fnErr) {
-            console.warn("Edge function direct call:", fnErr);
-          }
+          let usersCreated = 0;
+          let cciCount = parsedStations.length;
+          let rpcSuccess = false;
 
-          // 2. Also invoke stored procedure to ensure cci_master has all latest regions
+          // 1. Try atomic database RPC function bulk_create_station_cci_users
           try {
-            await supabase.rpc("upsert_station_region_batch", {
+            const { data: rpcData, error: rpcError } = await supabase.rpc("bulk_create_station_cci_users", {
               p_stations: parsedStations,
+              p_default_password: "Moto@123",
             });
-          } catch (rpcErr) {
-            console.warn("RPC upsert_station_region_batch:", rpcErr);
+
+            if (!rpcError && rpcData?.success) {
+              rpcSuccess = true;
+              usersCreated = rpcData.users_created || 0;
+              showToast(`Created ${usersCreated} Auth users directly in Supabase!`, "success");
+            }
+          } catch (e) {
+            console.warn("RPC bulk_create_station_cci_users not yet executed in DB:", e);
           }
 
-          const createdCount = edgeResult?.usersCreated || parsedStations.length;
-          const updatedCount = edgeResult?.cciUpdated || 0;
-          const insertedCount = edgeResult?.cciInserted || parsedStations.length;
+          // 2. If RPC was not yet run in SQL editor, use client-side Supabase Auth registration
+          if (!rpcSuccess) {
+            statusDiv.innerHTML = renderSpinner(`Registering Auth users in Supabase (${parsedStations.length} stations)...`);
 
-          showToast(`Successfully processed ${parsedStations.length} stations!`, "success");
+            // Direct upsert to cci_master
+            for (const st of parsedStations) {
+              await supabase.from("cci_master").upsert(
+                {
+                  cci_code: st.station_code,
+                  cci_name: st.station_name,
+                  region: st.region,
+                  location: st.location,
+                  status: "ACTIVE",
+                },
+                { onConflict: "cci_code" }
+              );
+            }
+
+            // Create temporary client with persistSession: false so admin is not signed out
+            const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL || window.__SUPABASE_URL__ || localStorage.getItem("__MOTO_SU_URL__");
+            const supabaseAnonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY || window.__SUPABASE_ANON_KEY__ || localStorage.getItem("__MOTO_SU_KEY__");
+
+            if (supabaseUrl && supabaseAnonKey) {
+              const { createClient } = await import("@supabase/supabase-js");
+              const tempClient = createClient(supabaseUrl, supabaseAnonKey, {
+                auth: { persistSession: false, autoRefreshToken: false },
+              });
+
+              for (const st of parsedStations) {
+                const userEmail = `${st.station_code.toLowerCase()}@motorolacare.in`;
+                try {
+                  const { data: signData, error: signErr } = await tempClient.auth.signUp({
+                    email: userEmail,
+                    password: "Moto@123",
+                    options: {
+                      data: {
+                        user_name: `CCI ${st.station_code}`,
+                        role: "CCI_USER",
+                        cci_code: st.station_code,
+                      },
+                    },
+                  });
+
+                  if (!signErr && signData?.user) {
+                    usersCreated++;
+                    // Insert into public.user_profiles
+                    await supabase.from("user_profiles").upsert(
+                      {
+                        auth_user_id: signData.user.id,
+                        user_name: `CCI ${st.station_code}`,
+                        role: "CCI_USER",
+                        cci_code: st.station_code,
+                        cci_name: st.station_name,
+                        status: "ACTIVE",
+                      },
+                      { onConflict: "auth_user_id" }
+                    );
+                  }
+                } catch (userErr) {
+                  console.warn(`User ${userEmail} registration:`, userErr);
+                }
+              }
+            }
+          }
+
+          showToast(`Processed ${parsedStations.length} stations, created ${usersCreated} Auth accounts!`, "success");
 
           statusDiv.innerHTML = `
-            <div style="padding:1rem; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; color:#065f46; font-size:0.875rem;">
-              <strong>Region Mapping Ingested Successfully!</strong>
-              <div style="margin-top:4px;">
-                &bull; Station CCIs Configured: <strong>${parsedStations.length}</strong>
-                <br>&bull; Agent Accounts Ready with default password <code>Moto@123</code>: <strong>${createdCount}</strong>
+            <div style="padding:1.25rem; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; color:#065f46; font-size:0.875rem;">
+              <strong style="font-size:1rem;">Region Mapping & Auth Users Pushed to Supabase!</strong>
+              <div style="margin-top:0.5rem; line-height:1.6;">
+                &bull; Stations configured in <code>cci_master</code>: <strong>${parsedStations.length}</strong>
+                <br>&bull; New Accounts in Supabase <code>auth.users</code>: <strong>${usersCreated}</strong>
+                <br>&bull; Default Password: <code>Moto@123</code>
               </div>
-              <div style="margin-top:0.75rem;">
-                <button type="button" class="btn-primary" id="btn-finish-region-import" style="padding:5px 12px; font-size:0.8125rem;">
-                  Done & Refresh List
+
+              <div style="margin-top:1rem; padding:0.75rem; background:#ffffff; border:1px solid #a7f3d0; border-radius:6px; font-size:0.8125rem; color:#065f46;">
+                <strong>Supabase SQL Helper:</strong> You can also run <a href="file:///Users/pramod47.kumar/Documents/Happy_Calling/supabase/migrations/20260913000001_bulk_create_station_cci_users.sql" target="_blank" style="text-decoration:underline; font-weight:700;">20260913000001_bulk_create_station_cci_users.sql</a> in your Supabase SQL Editor to enable instant database-level batch user generation.
+              </div>
+
+              <div style="margin-top:1rem;">
+                <button type="button" class="btn-primary" id="btn-finish-region-import" style="padding:6px 16px; font-size:0.875rem;">
+                  Done & Refresh CCI List
                 </button>
               </div>
             </div>
