@@ -385,7 +385,21 @@ DECLARE
     v_created INT := 0;
 BEGIN
     -- ------------------------------------------------------------------------
-    -- STEP 1: DELETE ALL NON-ADMIN ACCOUNTS
+    -- STEP 1: FIX ANY EXISTING ADMIN USER TO PREVENT SCAN ERRORS
+    -- ------------------------------------------------------------------------
+    UPDATE auth.users
+    SET confirmation_token = COALESCE(confirmation_token, ''),
+        recovery_token = COALESCE(recovery_token, ''),
+        email_change_token_new = COALESCE(email_change_token_new, ''),
+        email_change_token_current = COALESCE(email_change_token_current, ''),
+        email_change = COALESCE(email_change, ''),
+        phone_change = COALESCE(phone_change, ''),
+        phone_change_token = COALESCE(phone_change_token, ''),
+        reauthentication_token = COALESCE(reauthentication_token, ''),
+        confirmed_at = COALESCE(confirmed_at, email_confirmed_at, now());
+
+    -- ------------------------------------------------------------------------
+    -- STEP 2: DELETE ALL NON-ADMIN ACCOUNTS (Preserves your Admin account)
     -- ------------------------------------------------------------------------
     
     -- Delete non-admin identities
@@ -419,14 +433,14 @@ BEGIN
     RAISE NOTICE 'Cleaned up % non-admin user accounts.', v_deleted;
 
     -- ------------------------------------------------------------------------
-    -- STEP 2: ENSURE STATION 1 EXISTS IN cci_master
+    -- STEP 3: ENSURE STATION 1 EXISTS IN cci_master
     -- ------------------------------------------------------------------------
     INSERT INTO public.cci_master (cci_code, cci_name, region, location, status)
     VALUES ('1', 'Motorola Care - Station 1', 'General', 'General', 'ACTIVE')
     ON CONFLICT (cci_code) DO NOTHING;
 
     -- ------------------------------------------------------------------------
-    -- STEP 3: GENERATE CLEAN AUTH USERS FOR ALL STATIONS IN cci_master
+    -- STEP 4: GENERATE FRESH AUTH USERS WITH ALL REQUIRED NON-NULL TOKENS
     -- ------------------------------------------------------------------------
     FOR r IN 
         SELECT cci_code, cci_name, region, location 
@@ -439,13 +453,14 @@ BEGIN
         v_email := v_username || '@happycalling.in';
         v_auth_id := gen_random_uuid();
 
-        -- 3.1 Create user in auth.users
+        -- 4.1 Insert into auth.users (All token string fields explicitly set to '')
         INSERT INTO auth.users (
             id,
             instance_id,
             email,
             encrypted_password,
             email_confirmed_at,
+            confirmed_at,
             raw_app_meta_data,
             raw_user_meta_data,
             created_at,
@@ -453,12 +468,21 @@ BEGIN
             role,
             aud,
             confirmation_token,
-            is_super_admin
+            recovery_token,
+            email_change_token_new,
+            email_change_token_current,
+            email_change,
+            phone_change,
+            phone_change_token,
+            reauthentication_token,
+            is_super_admin,
+            is_sso_user
         ) VALUES (
             v_auth_id,
             '00000000-0000-0000-0000-000000000000'::uuid,
             v_email,
             v_pw,
+            now(),
             now(),
             '{"provider":"email","providers":["email"]}'::jsonb,
             jsonb_build_object(
@@ -471,11 +495,19 @@ BEGIN
             now(),
             'authenticated',
             'authenticated',
-            encode(gen_random_bytes(32), 'hex'),
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            false,
             false
         );
 
-        -- 3.2 Create identity in auth.identities
+        -- 4.2 Create identity in auth.identities
         BEGIN
             INSERT INTO auth.identities (
                 id,
@@ -495,12 +527,15 @@ BEGIN
                 now(),
                 now(),
                 now()
-            );
+            ) ON CONFLICT (id) DO UPDATE
+            SET identity_data = jsonb_build_object('sub', EXCLUDED.user_id::text, 'email', v_email),
+                provider_id = v_auth_id::text,
+                updated_at = now();
         EXCEPTION WHEN OTHERS THEN
             NULL;
         END;
 
-        -- 3.3 Create active profile in public.user_profiles
+        -- 4.3 Create active profile in public.user_profiles
         INSERT INTO public.user_profiles (
             auth_user_id,
             user_name,
