@@ -257,13 +257,10 @@ function renderCallingForm(mount, closure) {
             ${escapeHtml(closure.customer_name || "Valued Motorola Customer")}
           </h3>
 
-          <!-- Prominent SO Number, Warranty & Repair Type Badges -->
-          <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem;">
+          <div style="margin-top:0.4rem;">
             <span style="font-family:monospace; font-weight:700; font-size:0.875rem; color:var(--moto-blue-accent); background:rgba(0,114,206,0.08); padding:3px 8px; border-radius:4px; border:1px solid rgba(0,114,206,0.2);">
               SO: ${escapeHtml(closure.so_number)}
             </span>
-            ${renderWarrantyBadge(warrantyStatus)}
-            ${renderRepairBadge(repairType)}
           </div>
         </div>
         <div>
