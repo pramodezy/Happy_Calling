@@ -460,6 +460,45 @@ function mapAndPreviewRows(rawRows) {
     "service center name"
   );
 
+  const detectedWarrantyKey = findKey(
+    sampleRow,
+    "warranty status",
+    "warrantystatus",
+    "warranty_status",
+    "warranty",
+    "warranty type",
+    "warrantytype",
+    "warranty condition",
+    "warranty condition code",
+    "warranty category",
+    "iw oow",
+    "iw/oow",
+    "in warranty",
+    "out of warranty",
+    "warranty desc",
+    "warranty description"
+  );
+
+  const detectedRepairTypeKey = findKey(
+    sampleRow,
+    "repair type",
+    "repairtype",
+    "repair_type",
+    "job type",
+    "jobtype",
+    "type of repair",
+    "repair nature",
+    "service type",
+    "servicetype",
+    "action taken",
+    "repair category",
+    "repair description",
+    "fault type",
+    "defect type",
+    "repair action",
+    "repair status"
+  );
+
   parsedClosures = rawRows.map((r) => {
     const soNumber = String((detectedSoKey && r[detectedSoKey]) || "").trim();
     // Use detected closure_id, or fall back to SO Number if no separate Closure ID column exists
@@ -482,6 +521,9 @@ function mapAndPreviewRows(rawRows) {
     const rawCreationDate = detectedRepairCreationKey ? r[detectedRepairCreationKey] : null;
     const creationDateIso = rawCreationDate ? parseClosureDate(rawCreationDate) : null;
 
+    const warrantyStatus = detectedWarrantyKey ? String(r[detectedWarrantyKey] || "").trim() : null;
+    const repairType = detectedRepairTypeKey ? String(r[detectedRepairTypeKey] || "").trim() : null;
+
     return {
       closure_id: closureId,
       so_number: soNumber,
@@ -493,6 +535,8 @@ function mapAndPreviewRows(rawRows) {
       closure_date: closureDateIso,
       repair_complete_date: completeDateIso,
       repair_creation_date: creationDateIso,
+      warranty_status: warrantyStatus,
+      repair_type: repairType,
       source_data: r,
     };
   });
@@ -532,6 +576,8 @@ function mapAndPreviewRows(rawRows) {
               <th>Customer</th>
               <th>Mobile</th>
               <th>Model</th>
+              <th>Warranty</th>
+              <th>Repair Type</th>
               <th>Closure Date</th>
               <th>Status</th>
             </tr>
@@ -543,11 +589,13 @@ function mapAndPreviewRows(rawRows) {
                 return `
                 <tr style="${isValid ? "" : "background:#fef2f2;"}">
                   <td><strong style="font-family:monospace;">${escapeHtml(c.closure_id || "MISSING")}</strong></td>
-                  <td><span style="font-family:monospace; color:var(--moto-blue-accent);">${escapeHtml(c.so_number || "MISSING")}</span></td>
+                  <td><span style="font-family:monospace; color:var(--moto-blue-accent); font-weight:600;">${escapeHtml(c.so_number || "MISSING")}</span></td>
                   <td><span class="badge ${c.cci_code ? "badge-info" : "badge-danger"}">${escapeHtml(c.cci_code || "MISSING")}</span></td>
                   <td>${escapeHtml(c.customer_name)}</td>
                   <td>${escapeHtml(c.customer_mobile)}</td>
                   <td>${escapeHtml(c.model)}</td>
+                  <td><span class="badge badge-neutral" style="font-size:0.75rem;">${escapeHtml(c.warranty_status || "N/A")}</span></td>
+                  <td><span class="badge badge-neutral" style="font-size:0.75rem;">${escapeHtml(c.repair_type || "N/A")}</span></td>
                   <td>${formatDate(c.closure_date)}</td>
                   <td>${isValid ? '<span class="badge badge-success">Valid</span>' : '<span class="badge badge-danger">Incomplete</span>'}</td>
                 </tr>

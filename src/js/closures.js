@@ -77,7 +77,11 @@ async function populateCciOptions() {
   try {
     const { data } = await supabase.from("cci_master").select("cci_code, cci_name").order("cci_code");
     if (data) {
-      data.forEach((c) => {
+      const DEMO_CODES = new Set(["BLR01", "DEL01", "MUM01", "KOC01", "KOL01"]);
+      const hasStationCodes = data.some((c) => !DEMO_CODES.has(c.cci_code));
+      const activeData = hasStationCodes ? data.filter((c) => !DEMO_CODES.has(c.cci_code)) : data;
+
+      activeData.forEach((c) => {
         const opt = document.createElement("option");
         opt.value = c.cci_code;
         opt.textContent = `${c.cci_code} - ${c.cci_name}`;

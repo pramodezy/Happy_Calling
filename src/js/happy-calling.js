@@ -69,6 +69,23 @@ async function loadNextClosure() {
 
     currentClosure = data.closure;
 
+    // Load full closure fields (source_data, warranty_status, repair_type)
+    try {
+      const { data: fullRecord } = await supabase
+        .from("closure_master")
+        .select("source_data, warranty_status, repair_type")
+        .eq("id", currentClosure.id)
+        .maybeSingle();
+
+      if (fullRecord) {
+        currentClosure.source_data = fullRecord.source_data || currentClosure.source_data || {};
+        if (fullRecord.warranty_status) currentClosure.warranty_status = fullRecord.warranty_status;
+        if (fullRecord.repair_type) currentClosure.repair_type = fullRecord.repair_type;
+      }
+    } catch (e) {
+      console.warn("Could not load extended closure fields:", e);
+    }
+
     // Check if previous calling attempts exist for this closure
     try {
       const { data: pastAttempts } = await supabase
@@ -100,12 +117,108 @@ async function loadNextClosure() {
 }
 
 /**
+ * Extract Warranty Status and Repair Type from closure properties or source_data
+ */
+export function extractWarrantyAndRepair(closure) {
+  let warranty = closure.warranty_status || "";
+  let repair = closure.repair_type || "";
+
+  const src = closure.source_data || {};
+  const keys = Object.keys(src);
+
+  const findInSrc = (...synonyms) => {
+    for (const syn of synonyms) {
+      const target = syn.toLowerCase().replace(/[\s_/-]/g, "");
+      const matchedKey = keys.find((k) => k.toLowerCase().replace(/[\s_/-]/g, "") === target);
+      if (matchedKey && src[matchedKey] !== undefined && src[matchedKey] !== null) {
+        const val = String(src[matchedKey]).trim();
+        if (val) return val;
+      }
+    }
+    return "";
+  };
+
+  if (!warranty) {
+    warranty = findInSrc(
+      "warranty status",
+      "warrantystatus",
+      "warranty_status",
+      "warranty",
+      "warranty type",
+      "warrantytype",
+      "warranty condition",
+      "warranty condition code",
+      "warranty category",
+      "iw oow",
+      "iw/oow",
+      "in warranty",
+      "out of warranty",
+      "warranty desc",
+      "warranty description"
+    );
+  }
+
+  if (!repair) {
+    repair = findInSrc(
+      "repair type",
+      "repairtype",
+      "repair_type",
+      "job type",
+      "jobtype",
+      "type of repair",
+      "repair nature",
+      "service type",
+      "servicetype",
+      "action taken",
+      "repair category",
+      "repair description",
+      "fault type",
+      "defect type",
+      "repair action",
+      "repair status"
+    );
+  }
+
+  return {
+    warrantyStatus: warranty || "N/A",
+    repairType: repair || "N/A",
+  };
+}
+
+function renderWarrantyBadge(status) {
+  if (!status || status === "N/A") {
+    return `<span class="badge badge-neutral" style="font-size:0.75rem;">Warranty: N/A</span>`;
+  }
+  const sUpper = status.toUpperCase();
+  if (sUpper.includes("OUT") || sUpper.includes("OOW")) {
+    return `<span class="badge badge-warning" style="font-size:0.75rem; font-weight:600; display:inline-flex; align-items:center; gap:4px;">
+      <span>⚠️</span> <span>${escapeHtml(status)}</span>
+    </span>`;
+  } else if (sUpper.includes("IN") || sUpper.includes("IW") || sUpper.includes("WARRANTY")) {
+    return `<span class="badge badge-success" style="font-size:0.75rem; font-weight:600; display:inline-flex; align-items:center; gap:4px;">
+      <span>🛡️</span> <span>${escapeHtml(status)}</span>
+    </span>`;
+  }
+  return `<span class="badge badge-info" style="font-size:0.75rem; font-weight:600;">${escapeHtml(status)}</span>`;
+}
+
+function renderRepairBadge(repairType) {
+  if (!repairType || repairType === "N/A") {
+    return `<span class="badge badge-neutral" style="font-size:0.75rem;">Repair: N/A</span>`;
+  }
+  return `<span class="badge badge-neutral" style="font-size:0.75rem; font-weight:600; background:var(--bg-card); border:1px solid var(--border-medium); color:var(--text-primary); display:inline-flex; align-items:center; gap:4px;">
+    <span>🔧</span> <span>${escapeHtml(repairType)}</span>
+  </span>`;
+}
+
+/**
  * Render customer details and calling feedback form
  */
 function renderCallingForm(mount, closure) {
   const ageingDays = calculateAgeingDays(closure.closure_date);
   const formattedPhone = formatMobile(closure.customer_mobile);
   const telHref = closure.customer_mobile ? `tel:${closure.customer_mobile.replace(/\D/g, "")}` : "#";
+  const { warrantyStatus, repairType } = extractWarrantyAndRepair(closure);
 
   const attempts = closure.attempts || [];
   let attemptHistoryHtml = "";
@@ -143,13 +256,22 @@ function renderCallingForm(mount, closure) {
           <h3 style="font-size:1.25rem; font-weight:700; color:var(--text-primary); margin-top:0.25rem;">
             ${escapeHtml(closure.customer_name || "Valued Motorola Customer")}
           </h3>
+
+          <!-- Prominent SO Number, Warranty & Repair Type Badges -->
+          <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem;">
+            <span style="font-family:monospace; font-weight:700; font-size:0.875rem; color:var(--moto-blue-accent); background:rgba(0,114,206,0.08); padding:3px 8px; border-radius:4px; border:1px solid rgba(0,114,206,0.2);">
+              SO: ${escapeHtml(closure.so_number)}
+            </span>
+            ${renderWarrantyBadge(warrantyStatus)}
+            ${renderRepairBadge(repairType)}
+          </div>
         </div>
         <div>
           ${renderAgeingBadge(ageingDays)}
         </div>
       </div>
 
-      <div class="customer-meta-grid">
+      <div class="customer-meta-grid" style="margin-top:1.25rem;">
         <div class="customer-meta-item">
           <span class="meta-label">Customer Mobile</span>
           <a href="${telHref}" class="customer-phone-highlight" title="Click to call">
@@ -165,7 +287,17 @@ function renderCallingForm(mount, closure) {
 
         <div class="customer-meta-item">
           <span class="meta-label">SO Number</span>
-          <span class="meta-value" style="font-family:monospace; color:var(--moto-blue-accent);">${escapeHtml(closure.so_number)}</span>
+          <span class="meta-value" style="font-family:monospace; color:var(--moto-blue-accent); font-weight:700;">${escapeHtml(closure.so_number)}</span>
+        </div>
+
+        <div class="customer-meta-item">
+          <span class="meta-label">Warranty Status</span>
+          <div class="meta-value" style="margin-top:2px;">${renderWarrantyBadge(warrantyStatus)}</div>
+        </div>
+
+        <div class="customer-meta-item">
+          <span class="meta-label">Repair Type</span>
+          <div class="meta-value" style="margin-top:2px;">${renderRepairBadge(repairType)}</div>
         </div>
 
         <div class="customer-meta-item">

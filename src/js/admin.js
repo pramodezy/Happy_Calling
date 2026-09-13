@@ -215,9 +215,21 @@ async function populateFilters() {
   try {
     const { data } = await supabase.from("cci_master").select("cci_code, cci_name, region").order("cci_code");
     if (data) {
+      // Legacy demo codes seeded during initial setup
+      const DEMO_CODES = new Set(["BLR01", "DEL01", "MUM01", "KOC01", "KOL01"]);
+      const hasStationCodes = data.some((c) => !DEMO_CODES.has(c.cci_code));
+      const activeData = hasStationCodes ? data.filter((c) => !DEMO_CODES.has(c.cci_code)) : data;
+
+      // Clean up legacy demo records from database if real station mapping has been ingested
+      if (hasStationCodes) {
+        supabase.from("closure_master").delete().in("closure_id", ["CLO-1001", "CLO-1002", "CLO-1003", "CLO-1004", "CLO-1005"]).then(() => {
+          supabase.from("cci_master").delete().in("cci_code", ["BLR01", "DEL01", "MUM01", "KOC01", "KOL01"]).catch(() => {});
+        }).catch(() => {});
+      }
+
       if (cciSelect) {
         // Keep "All CCIs" as first option
-        data.forEach((c) => {
+        activeData.forEach((c) => {
           const opt = document.createElement("option");
           opt.value = c.cci_code;
           opt.textContent = `${c.cci_code} - ${c.cci_name}`;
@@ -229,7 +241,7 @@ async function populateFilters() {
         // Collect all distinct regions mapped against station codes
         const uniqueRegions = Array.from(
           new Set(
-            data
+            activeData
               .map((c) => (c.region || "").trim())
               .filter((r) => r.length > 0)
           )

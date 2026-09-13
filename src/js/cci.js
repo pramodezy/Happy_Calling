@@ -227,13 +227,17 @@ async function showCciFormModal(cci = null) {
   const isEditing = !!cci;
 
   // Load existing regions from cci_master dynamically
-  let regionOptions = ["North", "South", "East", "West", "Central"];
+  let regionOptions = [];
   try {
-    const { data: cciList } = await supabase.from("cci_master").select("region");
+    const { data: cciList } = await supabase.from("cci_master").select("cci_code, region");
     if (cciList) {
+      const DEMO_CODES = new Set(["BLR01", "DEL01", "MUM01", "KOC01", "KOL01"]);
+      const hasStationCodes = cciList.some((c) => !DEMO_CODES.has(c.cci_code));
+      const activeList = hasStationCodes ? cciList.filter((c) => !DEMO_CODES.has(c.cci_code)) : cciList;
+
       const dbRegions = Array.from(
         new Set(
-          cciList
+          activeList
             .map((c) => (c.region || "").trim())
             .filter((r) => r.length > 0)
         )

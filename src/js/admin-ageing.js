@@ -229,7 +229,11 @@ async function loadAgeingMetrics() {
     renderAgeingChart(fresh, warning, critical, breached);
 
     // Build Station-wise Breakdown
-    const cciList = dashData?.cci_performance || [];
+    const rawCciList = dashData?.cci_performance || [];
+    const DEMO_CODES = new Set(["BLR01", "DEL01", "MUM01", "KOC01", "KOL01"]);
+    const hasStationCodes = rawCciList.some((c) => !DEMO_CODES.has(c.cci_code));
+    const cciList = hasStationCodes ? rawCciList.filter((c) => !DEMO_CODES.has(c.cci_code)) : rawCciList;
+
     stationAgeingList = cciList
       .filter((c) => Number(c.pending_calls) > 0)
       .map((c) => {

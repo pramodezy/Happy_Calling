@@ -165,7 +165,10 @@ async function loadPerformanceMetrics() {
     if (error) throw error;
     if (!data) return;
 
-    allCciData = data.cci_performance || [];
+    const rawCciData = data.cci_performance || [];
+    const DEMO_CODES = new Set(["BLR01", "DEL01", "MUM01", "KOC01", "KOL01"]);
+    const hasStationCodes = rawCciData.some((c) => !DEMO_CODES.has(c.cci_code));
+    allCciData = hasStationCodes ? rawCciData.filter((c) => !DEMO_CODES.has(c.cci_code)) : rawCciData;
 
     // Calculate Tiers
     const totalStations = allCciData.length;

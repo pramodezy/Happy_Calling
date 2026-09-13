@@ -8,6 +8,7 @@ import { formatDate, formatDateTime, calculateAgeingDays, renderAgeingBadge, for
 import { renderDataTableWrapper } from "../components/table.js";
 import { renderTableSkeleton, renderSpinner } from "../components/loading.js";
 import { renderKpiCard } from "../components/kpi-card.js";
+import { extractWarrantyAndRepair } from "./happy-calling.js";
 
 let currentPage = 1;
 const PAGE_SIZE = 12;
@@ -207,7 +208,10 @@ export async function loadPendingTable() {
         customer_mobile,
         model,
         closure_date,
-        repair_complete_date
+        repair_complete_date,
+        warranty_status,
+        repair_type,
+        source_data
       `,
         { count: "exact" }
       );
@@ -340,10 +344,27 @@ export async function loadPendingTable() {
             }
           }
 
+          const { warrantyStatus, repairType } = extractWarrantyAndRepair(item);
+          let warrantyRepairPills = "";
+          if (warrantyStatus !== "N/A" || repairType !== "N/A") {
+            warrantyRepairPills = `<div style="display:flex; gap:4px; margin-top:3px; flex-wrap:wrap;">`;
+            if (warrantyStatus !== "N/A") {
+              const isOut = warrantyStatus.toUpperCase().includes("OUT") || warrantyStatus.toUpperCase().includes("OOW");
+              warrantyRepairPills += `<span class="badge ${isOut ? "badge-warning" : "badge-success"}" style="font-size:0.65rem; padding:1px 5px;">${escapeHtml(warrantyStatus)}</span>`;
+            }
+            if (repairType !== "N/A") {
+              warrantyRepairPills += `<span class="badge badge-neutral" style="font-size:0.65rem; padding:1px 5px; color:var(--text-secondary);">${escapeHtml(repairType)}</span>`;
+            }
+            warrantyRepairPills += `</div>`;
+          }
+
           return `
           <tr>
             <td><strong style="font-family:monospace; color:var(--text-primary);">${escapeHtml(item.closure_id)}</strong></td>
-            <td><span style="font-family:monospace; color:var(--moto-blue-accent);">${escapeHtml(item.so_number)}</span></td>
+            <td>
+              <span style="font-family:monospace; color:var(--moto-blue-accent); font-weight:600;">${escapeHtml(item.so_number)}</span>
+              ${warrantyRepairPills}
+            </td>
             <td>
               <div style="font-weight:600;">${escapeHtml(item.customer_name)}</div>
               <div style="font-size:0.75rem; color:var(--text-tertiary);">${escapeHtml(formatMobile(item.customer_mobile))}</div>
