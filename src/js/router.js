@@ -154,8 +154,11 @@ function renderLoginPage(container) {
         <!-- Login Form -->
         <form id="login-form" novalidate>
           <div class="form-group">
-            <label for="login-email" class="form-label">Email / Agent ID</label>
-            <input type="email" id="login-email" class="form-input" required placeholder="agent@motorolacare.in" autocomplete="username">
+            <label for="login-email" class="form-label">Username / Station Code / Email</label>
+            <input type="text" id="login-email" class="form-input" required placeholder="e.g. cci_65 or admin@motorolacare.in" autocomplete="username">
+            <div style="font-size:0.75rem; color:var(--text-tertiary); margin-top:4px;">
+              CCI Centers: Enter your station username (e.g. <code>cci_65</code>)
+            </div>
           </div>
 
           <div class="form-group">

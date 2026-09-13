@@ -114,10 +114,13 @@ export async function loadCciTable() {
             </td>
             <td style="text-align:right;">
               <div style="display:inline-flex; gap:0.35rem;">
-                <button type="button" class="btn-secondary btn-edit-cci" data-id="${c.id}" style="padding:4px 10px; font-size:0.75rem;">
+                <button type="button" class="btn-secondary btn-pw-cci" data-code="${escapeHtml(c.cci_code)}" data-name="${escapeHtml(c.cci_name)}" style="padding:4px 8px; font-size:0.75rem;" title="Manage / Regenerate Station Password">
+                  🔑 Credentials
+                </button>
+                <button type="button" class="btn-secondary btn-edit-cci" data-id="${c.id}" style="padding:4px 8px; font-size:0.75rem;">
                   Edit
                 </button>
-                <button type="button" class="btn-secondary btn-toggle-cci" data-id="${c.id}" data-status="${c.status}" style="padding:4px 10px; font-size:0.75rem;">
+                <button type="button" class="btn-secondary btn-toggle-cci" data-id="${c.id}" data-status="${c.status}" style="padding:4px 8px; font-size:0.75rem;">
                   ${isAct ? "Deactivate" : "Activate"}
                 </button>
               </div>
@@ -185,6 +188,15 @@ function attachCciActions(mount, totalRecords, currentCcis) {
       }, 300)
     );
   }
+
+  // Manage Credentials for Station
+  mount.querySelectorAll(".btn-pw-cci").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const code = btn.getAttribute("data-code");
+      const name = btn.getAttribute("data-name");
+      showCciCredentialsModal(code, name);
+    });
+  });
 
   // Edit CCI
   mount.querySelectorAll(".btn-edit-cci").forEach((btn) => {
@@ -451,7 +463,8 @@ function handleRegionFile(file, modalOverlay) {
         return `-- ============================================================================
 -- MOTOROLA HAPPY CALLING: DIRECT BATCH USER & CCI CREATION FOR SUPABASE
 -- Paste and Run in: Supabase Dashboard -> SQL Editor -> New Query -> Run
--- Total Stations: ${stations.length} | Default Password: ${defaultPassword}
+-- Total Stations: ${stations.length} | Username: cci_<station_code> (e.g. cci_65)
+-- Default Password: ${defaultPassword} (Changeable by Admin in Portal)
 -- ============================================================================
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -463,6 +476,7 @@ DECLARE
     v_region TEXT;
     v_name TEXT;
     v_location TEXT;
+    v_username TEXT;
     v_email TEXT;
     v_auth_id UUID;
     v_encrypted_pw TEXT;
@@ -485,6 +499,10 @@ BEGIN
             IF v_name IS NULL OR v_name = '' THEN v_name := 'Motorola Care - ' || v_code; END IF;
             IF v_location IS NULL OR v_location = '' THEN v_location := v_region; END IF;
 
+            -- Username format: cci_<station_code> (e.g. cci_65)
+            v_username := 'cci_' || lower(regexp_replace(v_code, '^cci_?', ''));
+            v_email := v_username || '@cci.local';
+
             -- 1. Upsert into cci_master
             INSERT INTO public.cci_master (cci_code, cci_name, region, location, status)
             VALUES (v_code, v_name, v_region, v_location, 'ACTIVE')
@@ -497,8 +515,11 @@ BEGIN
             v_cci_count := v_cci_count + 1;
 
             -- 2. Check Auth User
-            v_email := lower(v_code) || '@motorolacare.in';
-            SELECT id INTO v_auth_id FROM auth.users WHERE email = v_email LIMIT 1;
+            SELECT id INTO v_auth_id FROM auth.users 
+            WHERE email = v_email 
+               OR email = lower(v_code) || '@motorolacare.in' 
+               OR email = v_username || '@motorolacare.in'
+            LIMIT 1;
 
             IF v_auth_id IS NULL THEN
                 v_auth_id := gen_random_uuid();
@@ -524,7 +545,7 @@ BEGIN
                     v_encrypted_pw,
                     now(),
                     '{"provider":"email","providers":["email"]}'::jsonb,
-                    jsonb_build_object('user_name', v_name, 'role', 'CCI_USER', 'cci_code', v_code),
+                    jsonb_build_object('username', v_username, 'user_name', v_username, 'role', 'CCI_USER', 'cci_code', v_code),
                     now(),
                     now(),
                     'authenticated',
@@ -549,24 +570,25 @@ BEGIN
                 INSERT INTO public.user_profiles (
                     auth_user_id, user_name, role, cci_code, cci_name, status
                 ) VALUES (
-                    v_auth_id, 'CCI ' || v_code, 'CCI_USER', v_code, v_name, 'ACTIVE'
+                    v_auth_id, v_username, 'CCI_USER', v_code, v_name, 'ACTIVE'
                 ) ON CONFLICT (auth_user_id) DO NOTHING;
 
                 v_inserted_users := v_inserted_users + 1;
             ELSE
-                -- Update password if already exists
+                -- Update password and metadata
                 UPDATE auth.users
                 SET encrypted_password = v_encrypted_pw,
                     email_confirmed_at = COALESCE(email_confirmed_at, now()),
+                    raw_user_meta_data = jsonb_build_object('username', v_username, 'user_name', v_username, 'role', 'CCI_USER', 'cci_code', v_code),
                     updated_at = now()
                 WHERE id = v_auth_id;
 
                 INSERT INTO public.user_profiles (
                     auth_user_id, user_name, role, cci_code, cci_name, status
                 ) VALUES (
-                    v_auth_id, 'CCI ' || v_code, 'CCI_USER', v_code, v_name, 'ACTIVE'
+                    v_auth_id, v_username, 'CCI_USER', v_code, v_name, 'ACTIVE'
                 ) ON CONFLICT (auth_user_id) DO UPDATE
-                SET cci_code = v_code, cci_name = v_name, role = 'CCI_USER', status = 'ACTIVE', updated_at = now();
+                SET user_name = v_username, cci_code = v_code, cci_name = v_name, role = 'CCI_USER', status = 'ACTIVE', updated_at = now();
 
                 v_existing_users := v_existing_users + 1;
             END IF;
@@ -575,6 +597,45 @@ BEGIN
 
     RAISE NOTICE 'SUCCESS: % CCIs processed, % new Auth users created, % users updated.', v_cci_count, v_inserted_users, v_existing_users;
 END $$;
+
+-- 5. Helper Function: Admin Reset Password by Station Code
+CREATE OR REPLACE FUNCTION public.admin_reset_cci_password(
+    p_cci_code TEXT,
+    p_new_password TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+    v_auth_id UUID;
+    v_clean_code TEXT;
+    v_username TEXT;
+BEGIN
+    IF length(p_new_password) < 6 THEN
+        RAISE EXCEPTION 'Password must be at least 6 characters long';
+    END IF;
+
+    v_clean_code := UPPER(TRIM(p_cci_code));
+    v_username := 'cci_' || lower(regexp_replace(v_clean_code, '^cci_?', ''));
+
+    SELECT auth_user_id INTO v_auth_id FROM public.user_profiles WHERE cci_code = v_clean_code LIMIT 1;
+    IF v_auth_id IS NULL THEN
+        SELECT id INTO v_auth_id FROM auth.users WHERE email = v_username || '@cci.local' OR email = lower(v_clean_code) || '@motorolacare.in' LIMIT 1;
+    END IF;
+
+    IF v_auth_id IS NULL THEN
+        RAISE EXCEPTION 'No user account found for Station Code %', p_cci_code;
+    END IF;
+
+    UPDATE auth.users SET encrypted_password = crypt(p_new_password, gen_salt('bf', 10)), updated_at = now() WHERE id = v_auth_id;
+
+    RETURN jsonb_build_object('success', true, 'auth_user_id', v_auth_id, 'username', v_username, 'cci_code', v_clean_code);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.admin_reset_cci_password(TEXT, TEXT) TO authenticated, anon, service_role;
 `;
       }
 
@@ -586,7 +647,7 @@ END $$;
                 <span>✨</span> Instant Supabase Direct SQL Generator
               </div>
               <div style="font-size:0.8125rem; color:#94a3b8; margin-top:2px;">
-                Detected <strong>${parsedStations.length}</strong> stations from "${escapeHtml(file.name)}". Ready for 100% instant execution in Supabase Auth.
+                Detected <strong>${parsedStations.length}</strong> stations from "${escapeHtml(file.name)}". Ready to generate usernames (e.g. <code>cci_65</code>) and passwords.
               </div>
             </div>
             <div style="display:flex; gap:0.5rem;">
@@ -615,7 +676,7 @@ END $$;
                   <th>Station Code</th>
                   <th>Region</th>
                   <th>Center Name</th>
-                  <th>Generated Login Email</th>
+                  <th>Generated Username</th>
                   <th>Default Password</th>
                 </tr>
               </thead>
@@ -623,15 +684,18 @@ END $$;
                 ${parsedStations
                   .slice(0, 5)
                   .map(
-                    (s) => `
+                    (s) => {
+                      const uname = `cci_${s.station_code.toLowerCase().replace(/^(cci[_-]?)/i, "")}`;
+                      return `
                   <tr>
                     <td><strong style="font-family:monospace; color:var(--moto-blue-accent);">${escapeHtml(s.station_code)}</strong></td>
                     <td><span class="badge badge-info">${escapeHtml(s.region)}</span></td>
                     <td>${escapeHtml(s.station_name)}</td>
-                    <td><code>${escapeHtml(s.station_code.toLowerCase())}@motorolacare.in</code></td>
+                    <td><strong style="font-family:monospace; color:var(--moto-blue-primary);">${escapeHtml(uname)}</strong></td>
                     <td><code>Moto@123</code></td>
                   </tr>
-                `
+                `;
+                    }
                   )
                   .join("")}
               </tbody>
@@ -714,14 +778,16 @@ END $$;
             });
 
             for (const st of parsedStations) {
-              const email = `${st.station_code.toLowerCase()}@motorolacare.in`;
+              const username = `cci_${st.station_code.toLowerCase().replace(/^(cci[_-]?)/i, "")}`;
+              const email = `${username}@cci.local`;
               try {
                 const { data: userData, error: createErr } = await adminClient.auth.admin.createUser({
                   email: email,
                   password: "Moto@123",
                   email_confirm: true,
                   user_metadata: {
-                    user_name: `CCI ${st.station_code}`,
+                    user_name: username,
+                    username: username,
                     role: "CCI_USER",
                     cci_code: st.station_code,
                   },
@@ -732,7 +798,7 @@ END $$;
                   await adminClient.from("user_profiles").upsert(
                     {
                       auth_user_id: userData.user.id,
-                      user_name: `CCI ${st.station_code}`,
+                      user_name: username,
                       role: "CCI_USER",
                       cci_code: st.station_code,
                       cci_name: st.station_name,
@@ -741,10 +807,10 @@ END $$;
                     { onConflict: "auth_user_id" }
                   );
                 } else if (createErr) {
-                  console.warn(`Admin createUser error for ${email}:`, createErr.message);
+                  console.warn(`Admin createUser error for ${username}:`, createErr.message);
                 }
               } catch (e) {
-                console.warn(`Admin createUser exception for ${email}:`, e);
+                console.warn(`Admin createUser exception for ${username}:`, e);
               }
             }
             methodUsed = "Admin REST API (Service Role)";
@@ -775,6 +841,7 @@ END $$;
                 <div style="margin-top:0.5rem; line-height:1.6;">
                   &bull; Configured in <code>cci_master</code>: <strong>${cciUpsertCount}</strong>
                   <br>&bull; Created in Supabase <code>auth.users</code>: <strong>${usersCreated}</strong>
+                  <br>&bull; Username Format: <code>cci_&lt;station_code&gt;</code> (e.g. <code>cci_65</code>)
                   <br>&bull; Default Password: <code>Moto@123</code>
                   <br>&bull; Method: <strong>${methodUsed}</strong>
                 </div>
@@ -786,7 +853,6 @@ END $$;
               </div>
             `;
           } else {
-            // Users could not be created directly via client-side anon key without RPC or service role
             statusDiv.innerHTML = `
               <div style="padding:1.25rem; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; color:#92400e; font-size:0.875rem;">
                 <strong style="font-size:1rem; color:#b45309;">⚠️ Stations Saved, but Auth Users Require SQL Editor Run</strong>
@@ -802,7 +868,7 @@ END $$;
                     <li>Click the <strong>"Copy Supabase SQL"</strong> button below.</li>
                     <li>Go to your <strong>Supabase Dashboard &rarr; SQL Editor</strong>.</li>
                     <li>Click <strong>New Query</strong>, paste the copied SQL, and click <strong>Run</strong>.</li>
-                    <li>All <strong>${parsedStations.length} users</strong> will instantly appear in Supabase <strong>Authentication &rarr; Users</strong>!</li>
+                    <li>All <strong>${parsedStations.length} users</strong> (e.g. <code>cci_65</code>) will instantly appear in Supabase <strong>Authentication &rarr; Users</strong>!</li>
                   </ol>
                   <button type="button" id="btn-copy-supabase-sql-fallback" class="btn-primary" style="background:#0284c7; border:none; padding:8px 18px; font-weight:600; font-size:0.875rem;">
                     📋 Copy Supabase SQL Script Now
@@ -846,4 +912,140 @@ END $$;
   };
 
   reader.readAsArrayBuffer(file);
+}
+
+/**
+ * Manage / Regenerate Station Credentials Modal
+ */
+function showCciCredentialsModal(cciCode, cciName) {
+  const cleanCode = cciCode.toLowerCase().replace(/^(cci[_-]?)/i, "");
+  const username = `cci_${cleanCode}`;
+  const defaultPw = `Moto@${Math.floor(1000 + Math.random() * 9000)}`;
+
+  const contentHtml = `
+    <div style="margin-bottom:1rem;">
+      <p style="font-size:0.875rem; color:var(--text-secondary);">
+        Manage portal login credentials for Station <strong>${escapeHtml(cciCode)}</strong> (${escapeHtml(cciName)}).
+      </p>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Station Login Username</label>
+      <input type="text" class="form-input" readonly value="${escapeHtml(username)}" style="font-family:monospace; background:var(--bg-surface-subtle); font-weight:700; color:var(--moto-blue-accent);">
+      <div style="font-size:0.75rem; color:var(--text-tertiary); margin-top:2px;">
+        The station user logs in directly with this username.
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="input-cci-pw" class="form-label" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>Set / Regenerate Password *</span>
+        <button type="button" id="btn-gen-cci-pw" class="btn-secondary" style="padding:2px 8px; font-size:0.75rem;">
+          🎲 Generate Random
+        </button>
+      </label>
+      <input type="text" id="input-cci-pw" class="form-input" value="${defaultPw}" minlength="6" placeholder="Min 6 characters">
+    </div>
+
+    <div id="cci-pw-result" style="margin-top:1rem;"></div>
+  `;
+
+  const footerHtml = `
+    <button type="button" class="btn-secondary" id="btn-close-cci-pw">Close</button>
+    <button type="button" class="btn-primary" id="btn-save-cci-pw">Update & Share Password</button>
+  `;
+
+  const overlay = openModal({
+    title: `Station Credentials: ${cciCode}`,
+    contentHtml,
+    footerHtml,
+    size: "medium",
+  });
+
+  const inputPw = overlay.querySelector("#input-cci-pw");
+  const resultDiv = overlay.querySelector("#cci-pw-result");
+
+  overlay.querySelector("#btn-gen-cci-pw")?.addEventListener("click", () => {
+    inputPw.value = `Moto@${Math.floor(1000 + Math.random() * 9000)}`;
+  });
+
+  overlay.querySelector("#btn-close-cci-pw")?.addEventListener("click", closeModal);
+
+  overlay.querySelector("#btn-save-cci-pw")?.addEventListener("click", async () => {
+    const newPassword = inputPw.value.trim();
+    if (!newPassword || newPassword.length < 6) {
+      showToast("Password must be at least 6 characters.", "warning");
+      return;
+    }
+
+    const saveBtn = overlay.querySelector("#btn-save-cci-pw");
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Updating...";
+    resultDiv.innerHTML = renderSpinner("Updating password in Supabase...");
+
+    let success = false;
+    let errorMsg = null;
+
+    try {
+      const { data: rpcData, error: rpcErr } = await supabase.rpc("admin_reset_cci_password", {
+        p_cci_code: cciCode,
+        p_new_password: newPassword,
+      });
+
+      if (!rpcErr && rpcData?.success) {
+        success = true;
+      } else if (rpcErr) {
+        errorMsg = rpcErr.message;
+      }
+    } catch (e) {
+      errorMsg = e.message;
+    }
+
+    if (success) {
+      showToast(`Password updated for ${username}!`, "success");
+      saveBtn.style.display = "none";
+
+      const portalUrl = window.location.origin + window.location.pathname;
+      const shareText = `📱 MOTOROLA HAPPY CALLING - STATION LOGIN CREDENTIALS
+--------------------------------------------------
+Portal URL:   ${portalUrl}
+Username:     ${username}
+Password:     ${newPassword}
+Station Code: ${cciCode}
+Center Name:  ${cciName}
+--------------------------------------------------
+Login at the portal using your Username and Password.`;
+
+      resultDiv.innerHTML = `
+        <div style="padding:1rem; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; color:#065f46; font-size:0.875rem;">
+          <strong style="color:#047857;">✅ Password Updated in Supabase!</strong>
+          <p style="margin:0.25rem 0 0.75rem; font-size:0.8125rem; color:#065f46;">
+            Copy credentials below to share with the station:
+          </p>
+          <pre style="background:#ffffff; border:1px solid #a7f3d0; border-radius:6px; padding:0.75rem; font-family:monospace; font-size:0.8125rem; line-height:1.5; color:#1e293b; white-space:pre-wrap;">${escapeHtml(shareText)}</pre>
+          <button type="button" id="btn-copy-cci-share-creds" class="btn-primary" style="margin-top:0.75rem; width:100%; justify-content:center; padding:8px 14px; font-weight:600; font-size:0.8125rem;">
+            📋 Copy Credentials to Clipboard
+          </button>
+        </div>
+      `;
+
+      resultDiv.querySelector("#btn-copy-cci-share-creds")?.addEventListener("click", () => {
+        navigator.clipboard.writeText(shareText).then(() => {
+          showToast("Credentials copied! Ready to share via WhatsApp / Email.", "success");
+        });
+      });
+    } else {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Retry Update";
+
+      resultDiv.innerHTML = `
+        <div style="padding:1rem; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; color:#92400e; font-size:0.8125rem;">
+          <strong>RPC Error:</strong> ${escapeHtml(errorMsg || "Function admin_reset_cci_password not found.")}
+          <div style="margin-top:0.5rem; line-height:1.5;">
+            Run migration <code>20260913000001_bulk_create_station_cci_users.sql</code> in Supabase SQL Editor once to enable 1-click password resets for any station.
+          </div>
+        </div>
+      `;
+    }
+  });
 }

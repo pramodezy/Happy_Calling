@@ -83,23 +83,49 @@ export async function fetchCurrentUserProfile() {
 }
 
 /**
- * Authenticate user with Email & Password via Supabase Auth
+ * Authenticate user with Username (e.g. cci_65) or Email & Password via Supabase Auth
  */
-export async function loginWithEmail(email, password) {
+export async function loginWithEmail(identifier, password) {
   if (!isSupabaseConfigured() || !supabase) {
     throw new Error("Supabase is not configured. Please supply VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
   }
 
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: email.trim(),
-    password: password,
-  });
+  const raw = identifier.trim();
+  const candidates = [];
 
-  if (error) {
-    throw new Error(formatSupabaseError(error));
+  if (raw.includes("@")) {
+    candidates.push(raw);
+  } else {
+    // Support username format: 'cci_65', '65', 'BLR01', etc.
+    const cleanCode = raw.toLowerCase().replace(/^(cci[_-]?)/i, "");
+    candidates.push(`cci_${cleanCode}@cci.local`);
+    candidates.push(`cci_${cleanCode}@happycalling.local`);
+    candidates.push(`cci_${cleanCode}@motorolacare.in`);
+    candidates.push(`${cleanCode}@motorolacare.in`);
+    candidates.push(`${raw.toLowerCase()}@cci.local`);
   }
 
-  currentAuthUser = data.user;
+  let lastError = null;
+  let authData = null;
+
+  for (const candidateEmail of candidates) {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: candidateEmail,
+      password: password,
+    });
+
+    if (!error && data?.user) {
+      authData = data;
+      break;
+    }
+    lastError = error;
+  }
+
+  if (!authData) {
+    throw new Error(formatSupabaseError(lastError || "Invalid username or password."));
+  }
+
+  currentAuthUser = authData.user;
   const profile = await fetchCurrentUserProfile();
 
   if (!profile) {

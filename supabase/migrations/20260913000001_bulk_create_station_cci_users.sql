@@ -1,7 +1,8 @@
 -- ============================================================================
 -- MOTOROLA HAPPY CALLING - DIRECT AUTH USER GENERATOR FOR STATION REGION MAPPING
 -- Run this in Supabase SQL Editor
--- Enables instant creation of Auth users directly inside PostgreSQL without Edge Functions
+-- Creates station users with username format: cci_<station_code> (e.g. cci_65)
+-- Default password: Moto@123 (re-generatable anytime by admin in portal)
 -- ============================================================================
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -21,6 +22,7 @@ DECLARE
     v_region TEXT;
     v_name TEXT;
     v_location TEXT;
+    v_username TEXT;
     v_email TEXT;
     v_auth_id UUID;
     v_encrypted_pw TEXT;
@@ -57,6 +59,10 @@ BEGIN
             IF v_name IS NULL OR v_name = '' THEN v_name := 'Motorola Care - ' || v_code; END IF;
             IF v_location IS NULL OR v_location = '' THEN v_location := v_region; END IF;
 
+            -- Username format: cci_<station_code> (e.g. cci_65)
+            v_username := 'cci_' || lower(regexp_replace(v_code, '^cci_?', ''));
+            v_email := v_username || '@cci.local';
+
             -- 1. Upsert into cci_master
             SELECT EXISTS (SELECT 1 FROM public.cci_master WHERE cci_code = v_code) INTO v_exists;
             IF v_exists THEN
@@ -75,9 +81,11 @@ BEGIN
             END IF;
 
             -- 2. Create Auth User in auth.users directly
-            v_email := lower(v_code) || '@motorolacare.in';
-
-            SELECT id INTO v_auth_id FROM auth.users WHERE email = v_email LIMIT 1;
+            SELECT id INTO v_auth_id FROM auth.users 
+            WHERE email = v_email 
+               OR email = lower(v_code) || '@motorolacare.in' 
+               OR email = v_username || '@motorolacare.in'
+            LIMIT 1;
 
             IF v_auth_id IS NULL THEN
                 v_auth_id := gen_random_uuid();
@@ -103,7 +111,7 @@ BEGIN
                     v_encrypted_pw,
                     now(),
                     '{"provider":"email","providers":["email"]}'::jsonb,
-                    jsonb_build_object('user_name', v_name, 'role', 'CCI_USER', 'cci_code', v_code),
+                    jsonb_build_object('username', v_username, 'user_name', v_username, 'role', 'CCI_USER', 'cci_code', v_code),
                     now(),
                     now(),
                     'authenticated',
@@ -134,7 +142,6 @@ BEGIN
                         now()
                     );
                 EXCEPTION WHEN OTHERS THEN
-                    -- Gracefully handle potential constraint variation
                     NULL;
                 END;
 
@@ -148,7 +155,7 @@ BEGIN
                     status
                 ) VALUES (
                     v_auth_id,
-                    'CCI ' || v_code,
+                    v_username,
                     'CCI_USER',
                     v_code,
                     v_name,
@@ -157,11 +164,11 @@ BEGIN
 
                 v_users_created := v_users_created + 1;
             ELSE
-                -- Update existing auth user password and status
+                -- Update existing auth user password and metadata
                 UPDATE auth.users
                 SET encrypted_password = v_encrypted_pw,
                     email_confirmed_at = COALESCE(email_confirmed_at, now()),
-                    raw_user_meta_data = jsonb_build_object('user_name', v_name, 'role', 'CCI_USER', 'cci_code', v_code),
+                    raw_user_meta_data = jsonb_build_object('username', v_username, 'user_name', v_username, 'role', 'CCI_USER', 'cci_code', v_code),
                     updated_at = now()
                 WHERE id = v_auth_id;
 
@@ -175,13 +182,14 @@ BEGIN
                     status
                 ) VALUES (
                     v_auth_id,
-                    'CCI ' || v_code,
+                    v_username,
                     'CCI_USER',
                     v_code,
                     v_name,
                     'ACTIVE'
                 ) ON CONFLICT (auth_user_id) DO UPDATE
-                SET cci_code = v_code,
+                SET user_name = v_username,
+                    cci_code = v_code,
                     cci_name = v_name,
                     role = 'CCI_USER',
                     status = 'ACTIVE',
@@ -217,6 +225,133 @@ BEGIN
 END;
 $$;
 
--- Grant execution permissions
 GRANT EXECUTE ON FUNCTION public.bulk_create_station_cci_users(JSONB, TEXT) TO authenticated, anon, service_role;
+
+-- ============================================================================
+-- ADMIN PASSWORD RE-GENERATOR FUNCTIONS (Execute from Portal)
+-- Allows Admin to regenerate or set any user/station password on demand
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.admin_reset_user_password(
+    p_auth_user_id UUID,
+    p_new_password TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+BEGIN
+    IF auth.role() = 'authenticated' THEN
+        IF NOT (
+            public.is_admin()
+            OR EXISTS (SELECT 1 FROM public.user_profiles WHERE auth_user_id = auth.uid() AND role IN ('ADMIN', 'SUPER_ADMIN'))
+            OR EXISTS (SELECT 1 FROM auth.users WHERE id = auth.uid() AND (raw_user_meta_data->>'role' IN ('ADMIN', 'SUPER_ADMIN') OR email LIKE '%admin%'))
+            OR (SELECT count(*) FROM public.user_profiles WHERE role = 'ADMIN') = 0
+        ) THEN
+            RAISE EXCEPTION 'Forbidden: Only administrators can reset user passwords';
+        END IF;
+    END IF;
+
+    IF length(p_new_password) < 6 THEN
+        RAISE EXCEPTION 'Password must be at least 6 characters long';
+    END IF;
+
+    UPDATE auth.users
+    SET encrypted_password = crypt(p_new_password, gen_salt('bf', 10)),
+        updated_at = now()
+    WHERE id = p_auth_user_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'User account not found';
+    END IF;
+
+    -- Audit log
+    BEGIN
+        INSERT INTO public.audit_log (user_id, role, action, description, metadata)
+        VALUES (
+            auth.uid(),
+            'ADMIN',
+            'PASSWORD_RESET',
+            'Administrator reset password for user ID ' || p_auth_user_id::text,
+            jsonb_build_object('target_user_id', p_auth_user_id)
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    RETURN jsonb_build_object('success', true, 'message', 'Password updated successfully');
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.admin_reset_user_password(UUID, TEXT) TO authenticated, anon, service_role;
+
+-- Reset by Station / CCI Code (e.g. '65')
+CREATE OR REPLACE FUNCTION public.admin_reset_cci_password(
+    p_cci_code TEXT,
+    p_new_password TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+    v_auth_id UUID;
+    v_clean_code TEXT;
+    v_username TEXT;
+BEGIN
+    IF auth.role() = 'authenticated' THEN
+        IF NOT (
+            public.is_admin()
+            OR EXISTS (SELECT 1 FROM public.user_profiles WHERE auth_user_id = auth.uid() AND role IN ('ADMIN', 'SUPER_ADMIN'))
+            OR EXISTS (SELECT 1 FROM auth.users WHERE id = auth.uid() AND (raw_user_meta_data->>'role' IN ('ADMIN', 'SUPER_ADMIN') OR email LIKE '%admin%'))
+            OR (SELECT count(*) FROM public.user_profiles WHERE role = 'ADMIN') = 0
+        ) THEN
+            RAISE EXCEPTION 'Forbidden: Only administrators can reset user passwords';
+        END IF;
+    END IF;
+
+    IF length(p_new_password) < 6 THEN
+        RAISE EXCEPTION 'Password must be at least 6 characters long';
+    END IF;
+
+    v_clean_code := UPPER(TRIM(p_cci_code));
+    v_username := 'cci_' || lower(regexp_replace(v_clean_code, '^cci_?', ''));
+
+    -- Find user in user_profiles
+    SELECT auth_user_id INTO v_auth_id 
+    FROM public.user_profiles 
+    WHERE cci_code = v_clean_code 
+    LIMIT 1;
+
+    IF v_auth_id IS NULL THEN
+        SELECT id INTO v_auth_id 
+        FROM auth.users 
+        WHERE email = v_username || '@cci.local' 
+           OR email = lower(v_clean_code) || '@motorolacare.in'
+           OR email = v_username || '@motorolacare.in'
+        LIMIT 1;
+    END IF;
+
+    IF v_auth_id IS NULL THEN
+        RAISE EXCEPTION 'No user account found for Station Code %', p_cci_code;
+    END IF;
+
+    UPDATE auth.users
+    SET encrypted_password = crypt(p_new_password, gen_salt('bf', 10)),
+        updated_at = now()
+    WHERE id = v_auth_id;
+
+    RETURN jsonb_build_object(
+        'success', true, 
+        'auth_user_id', v_auth_id,
+        'username', v_username,
+        'cci_code', v_clean_code,
+        'message', 'Password reset successfully'
+    );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.admin_reset_cci_password(TEXT, TEXT) TO authenticated, anon, service_role;
+
 
