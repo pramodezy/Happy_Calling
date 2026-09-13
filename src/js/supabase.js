@@ -14,17 +14,21 @@ const getEnvVar = (key) => {
   return null;
 };
 
+// Default Supabase project credentials for Motorola Happy Calling Portal
+const DEFAULT_SUPABASE_URL = "https://fmvgnbaakgdbzbqgbmmh.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_H7JNZqFemNhOrq4ZQfhddA_lAx0h9MI";
+
 const SUPABASE_URL =
   getEnvVar("VITE_SUPABASE_URL") ||
   window.__SUPABASE_URL__ ||
   localStorage.getItem("__MOTO_SU_URL__") ||
-  "";
+  DEFAULT_SUPABASE_URL;
 
 const SUPABASE_ANON_KEY =
   getEnvVar("VITE_SUPABASE_ANON_KEY") ||
   window.__SUPABASE_ANON_KEY__ ||
   localStorage.getItem("__MOTO_SU_KEY__") ||
-  "";
+  DEFAULT_SUPABASE_ANON_KEY;
 
 // Helper to check if credentials are set
 export function isSupabaseConfigured() {
