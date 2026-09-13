@@ -1,0 +1,476 @@
+// ============================================================================
+// Admin Dashboard & Company-Wide Overview Controller
+// ============================================================================
+
+import { supabase, formatSupabaseError, subscribeToTable, unsubscribeChannel } from "./supabase.js";
+import { icons, escapeHtml, renderRatingBadge } from "./utils.js";
+import { renderKpiCard } from "../components/kpi-card.js";
+import { renderSpinner } from "../components/loading.js";
+import Chart from "chart.js/auto";
+
+let adminTrendChart = null;
+let adminFeedbackChart = null;
+let adminCciCompareChart = null;
+
+let filterCci = "";
+let filterRegion = "";
+let filterDateFrom = "";
+let filterDateTo = "";
+
+export async function renderAdminDashboard(container) {
+  container.innerHTML = `
+    <!-- Header with Live Indicator -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem;">
+      <div>
+        <div style="display:flex; align-items:center; gap:0.5rem;">
+          <h2 style="font-size:1.375rem; font-weight:700; color:var(--text-primary);">Motorola Enterprise Care Dashboard</h2>
+          <span class="badge badge-success" style="font-size:0.6875rem; padding:2px 8px;">
+            <span class="badge-dot" style="animation:pulse 1.5s infinite;"></span> LIVE REALTIME
+          </span>
+        </div>
+        <p style="font-size:0.875rem; color:var(--text-secondary);">Company-wide Happy Calling operations, CCI partner rankings, and customer sentiment analytics.</p>
+      </div>
+
+      <div style="display:flex; gap:0.5rem;">
+        <a href="#/admin/import" class="btn-primary" style="padding:7px 14px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;">
+          <span style="width:16px; height:16px;">${icons.upload}</span>
+          <span>Import Closures</span>
+        </a>
+        <a href="#/admin/closures" class="btn-secondary" style="padding:7px 14px; font-size:0.8125rem;">
+          <span>Closure DB</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="filter-toolbar">
+      <div class="filter-group">
+        <label for="admin-filter-cci">CCI:</label>
+        <select id="admin-filter-cci" class="filter-select">
+          <option value="">All CCIs</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="admin-filter-region">Region:</label>
+        <select id="admin-filter-region" class="filter-select">
+          <option value="">All Regions</option>
+          <option value="North">North</option>
+          <option value="South">South</option>
+          <option value="East">East</option>
+          <option value="West">West</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="admin-filter-from">From:</label>
+        <input type="date" id="admin-filter-from" class="filter-select">
+      </div>
+
+      <div class="filter-group">
+        <label for="admin-filter-to">To:</label>
+        <input type="date" id="admin-filter-to" class="filter-select">
+      </div>
+
+      <button type="button" id="btn-admin-filter-reset" class="btn-secondary" style="padding:4px 10px; font-size:0.75rem; margin-left:auto;">
+        Reset Filters
+      </button>
+    </div>
+
+    <!-- KPI Cards Grid (8 Required KPIs) -->
+    <div id="admin-kpi-mount" class="kpi-grid">
+      ${renderSpinner("Aggregating live company-wide KPIs...")}
+    </div>
+
+    <!-- Row 1: CCI Completion Comparison & Feedback Donut -->
+    <div class="dashboard-row">
+      <div class="chart-card">
+        <div class="chart-card-header">
+          <span class="chart-card-title">CCI Completion Rate Comparison (%)</span>
+        </div>
+        <div class="chart-container-relative">
+          <canvas id="canvas-admin-cci-compare"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-card-header">
+          <span class="chart-card-title">National Feedback Distribution</span>
+        </div>
+        <div class="chart-container-relative">
+          <canvas id="canvas-admin-feedback"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 2: 14-Day Completion Trend -->
+    <div class="chart-card" style="margin-bottom:1.75rem;">
+      <div class="chart-card-header">
+        <span class="chart-card-title">14-Day National Happy Calling Trend</span>
+      </div>
+      <div class="chart-container-relative" style="min-height:240px;">
+        <canvas id="canvas-admin-trend"></canvas>
+      </div>
+    </div>
+
+    <!-- CCI Performance Table & Leaderboard -->
+    <div class="table-card">
+      <div class="table-card-header">
+        <div>
+          <h3 class="table-card-title">CCI Partner Performance Table & Leaderboard</h3>
+          <span style="font-size:0.75rem; color:var(--text-tertiary);">Ranked by Completion % and Happy Calling CSAT</span>
+        </div>
+      </div>
+
+      <div class="table-responsive-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>CCI Code & Name</th>
+              <th>Region</th>
+              <th>Location</th>
+              <th>Total Closures</th>
+              <th>Completed Calls</th>
+              <th>Pending Calls</th>
+              <th>Completion %</th>
+              <th>Happy %</th>
+              <th>DSAT %</th>
+              <th>Avg Rating</th>
+            </tr>
+          </thead>
+          <tbody id="admin-cci-table-body">
+            <tr><td colspan="11">${renderSpinner("Loading CCI performance table...")}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  // Populate CCI dropdown options
+  await populateCciOptions();
+
+  // Attach filter listeners
+  document.getElementById("admin-filter-cci")?.addEventListener("change", (e) => {
+    filterCci = e.target.value;
+    loadAdminMetrics();
+  });
+
+  document.getElementById("admin-filter-region")?.addEventListener("change", (e) => {
+    filterRegion = e.target.value;
+    loadAdminMetrics();
+  });
+
+  document.getElementById("admin-filter-from")?.addEventListener("change", (e) => {
+    filterDateFrom = e.target.value;
+    loadAdminMetrics();
+  });
+
+  document.getElementById("admin-filter-to")?.addEventListener("change", (e) => {
+    filterDateTo = e.target.value;
+    loadAdminMetrics();
+  });
+
+  document.getElementById("btn-admin-filter-reset")?.addEventListener("click", () => {
+    filterCci = "";
+    filterRegion = "";
+    filterDateFrom = "";
+    filterDateTo = "";
+    const cciSel = document.getElementById("admin-filter-cci");
+    const regSel = document.getElementById("admin-filter-region");
+    const fromInput = document.getElementById("admin-filter-from");
+    const toInput = document.getElementById("admin-filter-to");
+    if (cciSel) cciSel.value = "";
+    if (regSel) regSel.value = "";
+    if (fromInput) fromInput.value = "";
+    if (toInput) toInput.value = "";
+    loadAdminMetrics();
+  });
+
+  await loadAdminMetrics();
+
+  // Enable Realtime updates for Admin Dashboard
+  subscribeToTable("admin_dashboard_realtime", "happy_calling", "*", () => {
+    loadAdminMetrics();
+  });
+}
+
+/**
+ * Populate CCI filter dropdown
+ */
+async function populateCciOptions() {
+  const select = document.getElementById("admin-filter-cci");
+  if (!select) return;
+
+  try {
+    const { data } = await supabase.from("cci_master").select("cci_code, cci_name").order("cci_code");
+    if (data) {
+      data.forEach((c) => {
+        const opt = document.createElement("option");
+        opt.value = c.cci_code;
+        opt.textContent = `${c.cci_code} - ${c.cci_name}`;
+        select.appendChild(opt);
+      });
+    }
+  } catch (err) {
+    console.warn("Could not load CCI options:", err);
+  }
+}
+
+/**
+ * Fetch and render admin dashboard data
+ */
+export async function loadAdminMetrics() {
+  const kpiMount = document.getElementById("admin-kpi-mount");
+  const tableBody = document.getElementById("admin-cci-table-body");
+  if (!kpiMount) return;
+
+  try {
+    const { data, error } = await supabase.rpc("get_admin_dashboard", {
+      p_cci_code: filterCci || null,
+      p_region: filterRegion || null,
+      p_date_from: filterDateFrom || null,
+      p_date_to: filterDateTo || null,
+    });
+
+    if (error) throw error;
+    if (!data) return;
+
+    // 8 Admin KPI cards:
+    // Total Closures, Completed Calls, Pending Calls, Completion %, Happy %, Neutral %, Unhappy %, Average Rating
+    kpiMount.innerHTML = `
+      ${renderKpiCard({
+        title: "Total Closures",
+        value: Number(data.total_closures).toLocaleString(),
+        icon: icons.database,
+        colorScheme: "blue",
+        subtitle: "Motorola Closed Jobs",
+      })}
+      ${renderKpiCard({
+        title: "Completed Calls",
+        value: Number(data.completed_calls).toLocaleString(),
+        icon: icons.checkCircle,
+        colorScheme: "green",
+        subtitle: "Verified Happy Calls",
+      })}
+      ${renderKpiCard({
+        title: "Pending Calls",
+        value: Number(data.pending_calls).toLocaleString(),
+        icon: icons.clock,
+        colorScheme: "amber",
+        subtitle: "Across All CCIs",
+      })}
+      ${renderKpiCard({
+        title: "Completion %",
+        value: `${data.completion_rate}%`,
+        icon: icons.award,
+        colorScheme: data.completion_rate >= 90 ? "green" : "purple",
+        subtitle: "National Benchmark: 95%",
+      })}
+      ${renderKpiCard({
+        title: "Happy %",
+        value: `${data.happy_rate}%`,
+        icon: icons.smile,
+        colorScheme: "green",
+        subtitle: `${data.happy_count} Delighted Customers`,
+      })}
+      ${renderKpiCard({
+        title: "Neutral %",
+        value: `${data.neutral_rate}%`,
+        icon: icons.meh,
+        colorScheme: "blue",
+        subtitle: `${data.neutral_count} Neutral Feedback`,
+      })}
+      ${renderKpiCard({
+        title: "Unhappy %",
+        value: `${data.unhappy_rate}%`,
+        icon: icons.frown,
+        colorScheme: data.unhappy_rate > 5 ? "red" : "amber",
+        subtitle: `${data.unhappy_count} DSAT Escalations`,
+      })}
+      ${renderKpiCard({
+        title: "Average Rating",
+        value: `${data.avg_rating} <span style="font-size:1.1rem; color:var(--text-tertiary);">/10</span>`,
+        icon: icons.award,
+        colorScheme: data.avg_rating >= 8 ? "green" : "amber",
+        subtitle: "National Customer CSAT",
+      })}
+    `;
+
+    // Render CCI Performance Table
+    const cciList = data.cci_performance || [];
+    if (tableBody) {
+      if (cciList.length === 0) {
+        tableBody.innerHTML = `
+          <tr>
+            <td colspan="11" style="text-align:center; padding:2rem; color:var(--text-tertiary);">
+              No CCI performance data matching the filters.
+            </td>
+          </tr>
+        `;
+      } else {
+        tableBody.innerHTML = cciList
+          .map((cci, idx) => {
+            let rankBadge = `<span style="font-weight:700; color:var(--text-tertiary);">#${idx + 1}</span>`;
+            if (idx === 0) rankBadge = `🥇 <strong style="color:#d97706;">1st</strong>`;
+            if (idx === 1) rankBadge = `🥈 <strong style="color:#64748b;">2nd</strong>`;
+            if (idx === 2) rankBadge = `🥉 <strong style="color:#b45309;">3rd</strong>`;
+
+            return `
+            <tr>
+              <td>${rankBadge}</td>
+              <td>
+                <div style="font-weight:600; color:var(--text-primary);">${escapeHtml(cci.cci_code)}</div>
+                <div style="font-size:0.75rem; color:var(--text-secondary);">${escapeHtml(cci.cci_name)}</div>
+              </td>
+              <td><span class="badge badge-neutral">${escapeHtml(cci.region || "—")}</span></td>
+              <td>${escapeHtml(cci.location || "—")}</td>
+              <td><strong>${Number(cci.total_closures).toLocaleString()}</strong></td>
+              <td><span style="color:var(--status-success-dot); font-weight:600;">${Number(cci.completed_calls).toLocaleString()}</span></td>
+              <td><span style="color:var(--status-warning-dot); font-weight:600;">${Number(cci.pending_calls).toLocaleString()}</span></td>
+              <td>
+                <strong>${cci.completion_rate}%</strong>
+              </td>
+              <td><span style="color:var(--status-success-dot); font-weight:600;">${cci.happy_rate}%</span></td>
+              <td><span style="color:var(--status-danger-dot); font-weight:600;">${cci.dsat_rate}%</span></td>
+              <td>${renderRatingBadge(cci.avg_rating)}</td>
+            </tr>
+          `;
+          })
+          .join("");
+      }
+    }
+
+    // Render Charts
+    renderCciComparisonChart(cciList.slice(0, 10));
+    renderAdminFeedbackChart(data.happy_count, data.neutral_count, data.unhappy_count);
+    renderAdminTrendChart(data.daily_trend || []);
+  } catch (err) {
+    console.error("loadAdminMetrics error:", err);
+    kpiMount.innerHTML = `
+      <div style="grid-column: 1 / -1; padding:1.5rem; background:#fef2f2; border:1px solid #fecaca; border-radius:8px; color:#991b1b;">
+        <strong>Error:</strong> ${formatSupabaseError(err)}
+      </div>
+    `;
+  }
+}
+
+function renderCciComparisonChart(cciList) {
+  const ctx = document.getElementById("canvas-admin-cci-compare")?.getContext("2d");
+  if (!ctx) return;
+
+  if (adminCciCompareChart) adminCciCompareChart.destroy();
+
+  const labels = cciList.map((c) => c.cci_code);
+  const completionRates = cciList.map((c) => c.completion_rate);
+
+  adminCciCompareChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Completion Rate (%)",
+          data: completionRates,
+          backgroundColor: completionRates.map((r) => (r >= 90 ? "#10b981" : r >= 75 ? "#0072ce" : "#f59e0b")),
+          borderRadius: 4,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+      },
+      scales: {
+        y: { beginAtZero: true, max: 100, grid: { color: "#e2e8f0" } },
+        x: { grid: { display: false } },
+      },
+    },
+  });
+}
+
+function renderAdminFeedbackChart(happy, neutral, unhappy) {
+  const ctx = document.getElementById("canvas-admin-feedback")?.getContext("2d");
+  if (!ctx) return;
+
+  if (adminFeedbackChart) adminFeedbackChart.destroy();
+
+  const total = happy + neutral + unhappy;
+
+  adminFeedbackChart = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: ["Happy", "Neutral", "Unhappy"],
+      datasets: [
+        {
+          data: total > 0 ? [happy, neutral, unhappy] : [1, 0, 0],
+          backgroundColor: total > 0 ? ["#10b981", "#94a3b8", "#ef4444"] : ["#e2e8f0", "#e2e8f0", "#e2e8f0"],
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "bottom" },
+      },
+      cutout: "68%",
+    },
+  });
+}
+
+function renderAdminTrendChart(trend) {
+  const ctx = document.getElementById("canvas-admin-trend")?.getContext("2d");
+  if (!ctx) return;
+
+  if (adminTrendChart) adminTrendChart.destroy();
+
+  const labels = trend.map((t) => t.day_label);
+  const completed = trend.map((t) => t.completed_count);
+  const happy = trend.map((t) => t.happy_count);
+
+  adminTrendChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Completed Calls",
+          data: completed,
+          borderColor: "#0072ce",
+          backgroundColor: "rgba(0, 114, 206, 0.08)",
+          fill: true,
+          tension: 0.35,
+        },
+        {
+          label: "Happy Customers",
+          data: happy,
+          borderColor: "#10b981",
+          backgroundColor: "transparent",
+          borderDash: [5, 5],
+          tension: 0.35,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "top" },
+      },
+      scales: {
+        y: { beginAtZero: true, grid: { color: "#e2e8f0" } },
+        x: { grid: { display: false } },
+      },
+    },
+  });
+}
+
+export function cleanupAdminDashboard() {
+  unsubscribeChannel("admin_dashboard_realtime");
+  if (adminTrendChart) adminTrendChart.destroy();
+  if (adminFeedbackChart) adminFeedbackChart.destroy();
+  if (adminCciCompareChart) adminCciCompareChart.destroy();
+}
