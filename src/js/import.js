@@ -223,6 +223,56 @@ function handleIncomingFile(file) {
 }
 
 /**
+ * Safely parse date from Excel/CSV (handles Excel serial numbers, Date objects, and formats like DD/MM/YYYY, YYYY-MM-DD, with time)
+ */
+function parseClosureDate(rawVal) {
+  if (!rawVal) return new Date().toISOString();
+
+  // If already a JS Date object
+  if (rawVal instanceof Date) {
+    if (!isNaN(rawVal.getTime())) return rawVal.toISOString();
+    return new Date().toISOString();
+  }
+
+  // If numeric Excel timestamp (e.g. 45548.697)
+  if (typeof rawVal === "number" && !isNaN(rawVal)) {
+    const jsDate = new Date(Math.round((rawVal - 25569) * 86400 * 1000));
+    if (!isNaN(jsDate.getTime())) return jsDate.toISOString();
+  }
+
+  // If string
+  if (typeof rawVal === "string") {
+    const trimmed = rawVal.trim();
+    if (!trimmed) return new Date().toISOString();
+
+    // Check for DD/MM/YYYY or DD-MM-YYYY (e.g. 13/09/2026 18:30:00 or 13-09-2026 06:30 PM)
+    const ddmmyyyyRegex = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?(?:\s*(AM|PM))?$/i;
+    const match = trimmed.match(ddmmyyyyRegex);
+    if (match) {
+      let day = parseInt(match[1], 10);
+      let month = parseInt(match[2], 10) - 1; // 0-indexed month
+      let year = parseInt(match[3], 10);
+      let hour = match[4] ? parseInt(match[4], 10) : 0;
+      let min = match[5] ? parseInt(match[5], 10) : 0;
+      let sec = match[6] ? parseInt(match[6], 10) : 0;
+      const ampm = match[7] ? match[7].toUpperCase() : null;
+
+      if (ampm === "PM" && hour < 12) hour += 12;
+      if (ampm === "AM" && hour === 12) hour = 0;
+
+      const parsed = new Date(year, month, day, hour, min, sec);
+      if (!isNaN(parsed.getTime())) return parsed.toISOString();
+    }
+
+    // Try standard JavaScript Date parser (handles YYYY-MM-DD, ISO-8601, etc.)
+    const fallback = new Date(trimmed);
+    if (!isNaN(fallback.getTime())) return fallback.toISOString();
+  }
+
+  return new Date().toISOString();
+}
+
+/**
  * Automatically match headers with known Motorola variations and synonyms
  */
 function mapAndPreviewRows(rawRows) {
@@ -342,14 +392,58 @@ function mapAndPreviewRows(rawRows) {
 
   const detectedDateKey = findKey(
     sampleRow,
+    "so close time",
+    "soclosetime",
+    "so_close_time",
+    "so close date",
+    "soclosedate",
+    "so_close_date",
+    "so closed time",
+    "so closed date",
+    "close time",
+    "closetime",
+    "close_time",
+    "closure time",
+    "closuretime",
+    "closure_time",
     "closure date",
     "closure_date",
     "closuredate",
     "closed date",
+    "closed time",
+    "closeddate",
+    "closedtime",
+    "repair close time",
     "repair closure date",
+    "repair completion time",
     "repair completion date",
+    "repair complete date",
+    "repair complete time",
     "complete date",
+    "complete time",
     "date"
+  );
+
+  const detectedRepairCompleteKey = findKey(
+    sampleRow,
+    "repair complete date",
+    "repair complete time",
+    "repair completed date",
+    "repair completed time",
+    "repair completion date",
+    "repair completion time"
+  );
+
+  const detectedRepairCreationKey = findKey(
+    sampleRow,
+    "repair creation date",
+    "repair creation time",
+    "repair create date",
+    "repair create time",
+    "call reg date",
+    "call registration date",
+    "creation date",
+    "booking date"
   );
 
   const detectedCciNameKey = findKey(
@@ -377,7 +471,16 @@ function mapAndPreviewRows(rawRows) {
     const customerName = String((detectedNameKey && r[detectedNameKey]) || "Valued Customer").trim();
     const customerMobile = String((detectedMobileKey && r[detectedMobileKey]) || "N/A").trim();
     const model = String((detectedModelKey && r[detectedModelKey]) || "Motorola Device").trim();
-    const closureDate = (detectedDateKey && r[detectedDateKey]) || new Date();
+    
+    // Extract closure date from "SO Close Time"
+    const rawClosureDate = detectedDateKey ? r[detectedDateKey] : null;
+    const closureDateIso = parseClosureDate(rawClosureDate);
+
+    const rawCompleteDate = detectedRepairCompleteKey ? r[detectedRepairCompleteKey] : null;
+    const completeDateIso = rawCompleteDate ? parseClosureDate(rawCompleteDate) : null;
+
+    const rawCreationDate = detectedRepairCreationKey ? r[detectedRepairCreationKey] : null;
+    const creationDateIso = rawCreationDate ? parseClosureDate(rawCreationDate) : null;
 
     return {
       closure_id: closureId,
@@ -387,9 +490,9 @@ function mapAndPreviewRows(rawRows) {
       customer_name: customerName,
       customer_mobile: customerMobile,
       model: model,
-      closure_date: closureDate ? new Date(closureDate).toISOString() : new Date().toISOString(),
-      repair_complete_date: null,
-      repair_creation_date: null,
+      closure_date: closureDateIso,
+      repair_complete_date: completeDateIso,
+      repair_creation_date: creationDateIso,
       source_data: r,
     };
   });
@@ -405,11 +508,12 @@ function mapAndPreviewRows(rawRows) {
       <div class="table-card-header">
         <div>
           <h3 class="table-card-title">Parsed File Summary: ${escapeHtml(fileMetadata.name)}</h3>
-          <span style="font-size:0.8125rem; color:var(--text-secondary);">
+          <div style="font-size:0.8125rem; color:var(--text-secondary); margin-top:2px;">
             Total Rows: <strong>${parsedClosures.length}</strong> | 
             Valid for Ingestion: <strong style="color:var(--status-success-dot);">${validRecords.length}</strong> | 
-            Missing Critical IDs: <strong style="color:var(--status-danger-dot);">${invalidRecords.length}</strong>
-          </span>
+            Missing Critical IDs: <strong style="color:var(--status-danger-dot);">${invalidRecords.length}</strong> | 
+            Close Date Column: <strong style="color:var(--moto-blue-accent);">${escapeHtml(detectedDateKey || "Not found (Upload Time)")}</strong>
+          </div>
         </div>
 
         <button type="button" id="btn-execute-import" class="btn-primary" ${validRecords.length === 0 ? "disabled" : ""}>
