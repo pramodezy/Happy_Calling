@@ -229,42 +229,167 @@ function mapAndPreviewRows(rawRows) {
   const previewArea = document.getElementById("import-preview-area");
   if (!previewArea) return;
 
-  // Synonyms map
-  const findValue = (row, ...synonyms) => {
+  // Helper to find matching header key
+  const findKey = (row, ...synonyms) => {
     const rowKeys = Object.keys(row);
     for (const syn of synonyms) {
       const target = syn.toLowerCase().replace(/[\s_-]/g, "");
       const matchedKey = rowKeys.find((k) => k.toLowerCase().replace(/[\s_-]/g, "") === target);
-      if (matchedKey && row[matchedKey] !== undefined && row[matchedKey] !== "") {
-        return row[matchedKey];
-      }
+      if (matchedKey) return matchedKey;
     }
     return "";
   };
 
+  const sampleRow = rawRows[0] || {};
+  const detectedCciKey = findKey(
+    sampleRow,
+    "station code",
+    "stationcode",
+    "station_code",
+    "station",
+    "station id",
+    "stationid",
+    "cci code",
+    "cci_code",
+    "ccicode",
+    "asc code",
+    "asccode",
+    "center code",
+    "centercode",
+    "service center code",
+    "cci"
+  );
+
+  const detectedSoKey = findKey(
+    sampleRow,
+    "so number",
+    "sonumber",
+    "so_number",
+    "so",
+    "service order",
+    "service order no",
+    "service order number",
+    "order no",
+    "order number"
+  );
+
+  const detectedClosureIdKey = findKey(
+    sampleRow,
+    "closure id",
+    "closure_id",
+    "closureid",
+    "job no",
+    "job_no",
+    "jobid",
+    "job id",
+    "call no",
+    "call id",
+    "repair id",
+    "sr no",
+    "sr_no",
+    "service request id",
+    "incident id"
+  );
+
+  const detectedNameKey = findKey(
+    sampleRow,
+    "customer name",
+    "customer_name",
+    "customername",
+    "customer",
+    "client name",
+    "client",
+    "cust name",
+    "cust_name"
+  );
+
+  const detectedMobileKey = findKey(
+    sampleRow,
+    "mobile no",
+    "mobile number",
+    "mobileno",
+    "mobile_no",
+    "customer mobile",
+    "customer_mobile",
+    "contact no",
+    "contact number",
+    "contactno",
+    "contact",
+    "phone no",
+    "phoneno",
+    "phone number",
+    "phone",
+    "telephone",
+    "mobile",
+    "cust mobile",
+    "cust phone",
+    "cell",
+    "cell phone",
+    "primary phone"
+  );
+
+  const detectedModelKey = findKey(
+    sampleRow,
+    "model",
+    "model name",
+    "model_name",
+    "product",
+    "device",
+    "handset model",
+    "handset",
+    "item model"
+  );
+
+  const detectedDateKey = findKey(
+    sampleRow,
+    "closure date",
+    "closure_date",
+    "closuredate",
+    "closed date",
+    "repair closure date",
+    "repair completion date",
+    "complete date",
+    "date"
+  );
+
+  const detectedCciNameKey = findKey(
+    sampleRow,
+    "station name",
+    "stationname",
+    "station_name",
+    "center name",
+    "center_name",
+    "asc name",
+    "asc_name",
+    "cci name",
+    "cci_name",
+    "service center name"
+  );
+
   parsedClosures = rawRows.map((r) => {
-    const closureId = String(findValue(r, "closure_id", "closure id", "closureid", "job_no", "job no", "jobid", "service order id")).trim();
-    const soNumber = String(findValue(r, "so_number", "so number", "sonumber", "so", "service order", "order no")).trim();
-    const cciCode = String(findValue(r, "cci_code", "cci code", "ccicode", "center code", "asc code", "service center code", "cci")).trim().toUpperCase();
-    const cciName = String(findValue(r, "cci_name", "cci name", "cciname", "center name", "asc name", "service center name")).trim();
-    const customerName = String(findValue(r, "customer_name", "customer name", "customer", "client name", "cust name")).trim();
-    const customerMobile = String(findValue(r, "customer_mobile", "customer mobile", "mobile", "phone", "contact", "cust mobile")).trim();
-    const model = String(findValue(r, "model", "model name", "product", "device", "handset model")).trim();
-    const closureDate = findValue(r, "closure_date", "closure date", "closed date", "repair closure date", "date");
-    const repairCompleteDate = findValue(r, "repair_complete_date", "repair complete date", "complete date", "completion date");
-    const repairCreationDate = findValue(r, "repair_creation_date", "repair creation date", "creation date", "start date", "in date");
+    const soNumber = String((detectedSoKey && r[detectedSoKey]) || "").trim();
+    // Use detected closure_id, or fall back to SO Number if no separate Closure ID column exists
+    const rawClosureId = String((detectedClosureIdKey && r[detectedClosureIdKey]) || "").trim();
+    const closureId = rawClosureId || soNumber;
+
+    const cciCode = String((detectedCciKey && r[detectedCciKey]) || "").trim().toUpperCase();
+    const cciName = String((detectedCciNameKey && r[detectedCciNameKey]) || cciCode).trim();
+    const customerName = String((detectedNameKey && r[detectedNameKey]) || "Valued Customer").trim();
+    const customerMobile = String((detectedMobileKey && r[detectedMobileKey]) || "N/A").trim();
+    const model = String((detectedModelKey && r[detectedModelKey]) || "Motorola Device").trim();
+    const closureDate = (detectedDateKey && r[detectedDateKey]) || new Date();
 
     return {
       closure_id: closureId,
       so_number: soNumber,
       cci_code: cciCode,
       cci_name: cciName || cciCode,
-      customer_name: customerName || "Unknown Customer",
-      customer_mobile: customerMobile || "N/A",
-      model: model || "Motorola Device",
+      customer_name: customerName,
+      customer_mobile: customerMobile,
+      model: model,
       closure_date: closureDate ? new Date(closureDate).toISOString() : new Date().toISOString(),
-      repair_complete_date: repairCompleteDate ? new Date(repairCompleteDate).toISOString() : null,
-      repair_creation_date: repairCreationDate ? new Date(repairCreationDate).toISOString() : null,
+      repair_complete_date: null,
+      repair_creation_date: null,
       source_data: r,
     };
   });

@@ -118,10 +118,10 @@ serve(async (req) => {
       };
 
       return {
-        closure_id: getVal("closure_id", "closure id", "closureid", "job_no", "job no"),
-        so_number: getVal("so_number", "so number", "sonumber", "so", "service order"),
-        cci_code: getVal("cci_code", "cci code", "ccicode", "center code", "asc code"),
-        cci_name: getVal("cci_name", "cci name", "cciname", "center name", "asc name"),
+        closure_id: getVal("closure_id", "closure id", "closureid", "job_no", "job no") || getVal("so_number", "so number", "sonumber", "so", "service order"),
+        so_number: getVal("so_number", "so number", "sonumber", "so", "service order", "order no"),
+        cci_code: getVal("station code", "stationcode", "station_code", "station", "station id", "cci_code", "cci code", "ccicode", "center code", "asc code"),
+        cci_name: getVal("station name", "stationname", "station_name", "cci_name", "cci name", "cciname", "center name", "asc name"),
         customer_name: getVal("customer_name", "customer name", "customer", "client name"),
         customer_mobile: getVal("customer_mobile", "customer mobile", "mobile", "phone", "contact"),
         model: getVal("model", "product", "device", "model name"),
