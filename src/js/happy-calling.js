@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { supabase, formatSupabaseError } from "./supabase.js";
-import { formatMobile, formatDate, calculateAgeingDays, renderAgeingBadge, escapeHtml, icons } from "./utils.js";
+import { formatMobile, formatDate, formatDateTime, calculateAgeingDays, renderAgeingBadge, escapeHtml, icons } from "./utils.js";
 import { showToast } from "../components/toast.js";
 import { renderSpinner } from "../components/loading.js";
 
@@ -68,6 +68,22 @@ async function loadNextClosure() {
     }
 
     currentClosure = data.closure;
+
+    // Check if previous calling attempts exist for this closure
+    try {
+      const { data: pastAttempts } = await supabase
+        .from("happy_calling")
+        .select("calling_status, calling_date, calling_time, customer_remarks, cci_remarks, created_at")
+        .eq("closure_id", currentClosure.closure_id)
+        .order("created_at", { ascending: false });
+
+      if (pastAttempts && pastAttempts.length > 0) {
+        currentClosure.attempts = pastAttempts;
+      }
+    } catch (e) {
+      console.warn("Could not check previous attempts:", e);
+    }
+
     renderCallingForm(mount, currentClosure);
   } catch (err) {
     console.error("loadNextClosure error:", err);
@@ -90,6 +106,33 @@ function renderCallingForm(mount, closure) {
   const ageingDays = calculateAgeingDays(closure.closure_date);
   const formattedPhone = formatMobile(closure.customer_mobile);
   const telHref = closure.customer_mobile ? `tel:${closure.customer_mobile.replace(/\D/g, "")}` : "#";
+
+  const attempts = closure.attempts || [];
+  let attemptHistoryHtml = "";
+  if (attempts.length > 0) {
+    const latest = attempts[0];
+    const isUnreachable = latest.calling_status === "Customer Not Reachable";
+    const bg = isUnreachable ? "#fffbeb" : "#eff6ff";
+    const border = isUnreachable ? "#fde68a" : "#bfdbfe";
+
+    attemptHistoryHtml = `
+      <div style="margin-top:1rem; padding:0.875rem 1rem; background:${bg}; border:1px solid ${border}; border-radius:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+          <div style="display:flex; align-items:center; gap:0.4rem;">
+            <span style="font-size:1.1rem;">${isUnreachable ? "⚠️" : "📞"}</span>
+            <strong style="color:var(--text-primary); font-size:0.875rem;">Calling Attempt History (${attempts.length} previous attempt${attempts.length > 1 ? "s" : ""})</strong>
+          </div>
+          <span class="badge ${isUnreachable ? "badge-warning" : "badge-info"}" style="font-size:0.75rem;">
+            ${escapeHtml(latest.calling_status)}
+          </span>
+        </div>
+        <div style="font-size:0.8125rem; color:var(--text-secondary); margin-top:0.35rem;">
+          Last Attempt: <strong>${formatDateTime(latest.created_at || `${latest.calling_date} ${latest.calling_time}`)}</strong>
+          ${latest.customer_remarks || latest.cci_remarks ? ` • Notes: <em>"${escapeHtml(latest.customer_remarks || latest.cci_remarks)}"</em>` : ""}
+        </div>
+      </div>
+    `;
+  }
 
   mount.innerHTML = `
     <!-- Customer & Job Details Card -->
@@ -140,6 +183,8 @@ function renderCallingForm(mount, closure) {
           <span class="meta-value">${escapeHtml(closure.cci_name || closure.cci_code)}</span>
         </div>
       </div>
+
+      ${attemptHistoryHtml}
     </div>
 
     <!-- Calling Feedback Form -->

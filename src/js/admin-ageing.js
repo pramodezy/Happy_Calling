@@ -13,10 +13,12 @@ let ageingDoughnutChart = null;
 let stationAgeingList = [];
 let searchQuery = "";
 let filterSla = "ALL"; // ALL, BREACHED (>72h), AT_RISK (48-72h), NORMAL (<48h)
+let filterRegion = "";
 
 export async function renderAdminAgeingPage(container) {
   searchQuery = "";
   filterSla = "ALL";
+  filterRegion = "";
 
   container.innerHTML = `
     <!-- Header with Breadcrumbs & Action -->
@@ -108,8 +110,12 @@ export async function renderAdminAgeingPage(container) {
         <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
           <input type="text" id="ageing-search-input" placeholder="Search station code, name..." class="form-input" style="padding:5px 10px; font-size:0.8125rem; width:200px;">
           
+          <select id="ageing-region-filter" class="filter-select" style="font-size:0.8125rem; padding:5px 10px;">
+            <option value="">All Regions</option>
+          </select>
+
           <select id="ageing-sla-filter" class="filter-select" style="font-size:0.8125rem; padding:5px 10px;">
-            <option value="ALL">All Stations</option>
+            <option value="ALL">All Statuses</option>
             <option value="BREACHED">SLA Breached (>72h Only)</option>
             <option value="AT_RISK">At Risk (48-72h)</option>
             <option value="NORMAL">Compliant (&lt;48h)</option>
@@ -143,6 +149,11 @@ export async function renderAdminAgeingPage(container) {
   // Attach event listeners
   document.getElementById("ageing-search-input")?.addEventListener("input", (e) => {
     searchQuery = e.target.value.toLowerCase().trim();
+    renderFilteredAgeingTable();
+  });
+
+  document.getElementById("ageing-region-filter")?.addEventListener("change", (e) => {
+    filterRegion = e.target.value;
     renderFilteredAgeingTable();
   });
 
@@ -257,6 +268,28 @@ async function loadAgeingMetrics() {
       })
       .sort((a, b) => b.breached_count - a.breached_count || b.pending_count - a.pending_count);
 
+    // Populate Region dropdown dynamically from cciList
+    const regSelect = document.getElementById("ageing-region-filter");
+    if (regSelect && regSelect.options.length <= 1) {
+      const currentVal = filterRegion;
+      regSelect.innerHTML = `<option value="">All Regions</option>`;
+      const uniqueRegions = Array.from(
+        new Set(
+          cciList
+            .map((c) => (c.region || "").trim())
+            .filter((r) => r.length > 0)
+        )
+      ).sort();
+
+      uniqueRegions.forEach((reg) => {
+        const opt = document.createElement("option");
+        opt.value = reg;
+        opt.textContent = reg;
+        if (reg === currentVal) opt.selected = true;
+        regSelect.appendChild(opt);
+      });
+    }
+
     renderFilteredAgeingTable();
   } catch (err) {
     console.error("loadAgeingMetrics error:", err);
@@ -327,6 +360,10 @@ function renderFilteredAgeingTable() {
         (s.cci_code && s.cci_code.toLowerCase().includes(searchQuery)) ||
         (s.cci_name && s.cci_name.toLowerCase().includes(searchQuery))
     );
+  }
+
+  if (filterRegion) {
+    filtered = filtered.filter((s) => s.region === filterRegion);
   }
 
   if (filterSla === "BREACHED") {

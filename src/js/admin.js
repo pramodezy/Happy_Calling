@@ -64,10 +64,6 @@ export async function renderAdminDashboard(container) {
         <label for="admin-filter-region">Region:</label>
         <select id="admin-filter-region" class="filter-select">
           <option value="">All Regions</option>
-          <option value="North">North</option>
-          <option value="South">South</option>
-          <option value="East">East</option>
-          <option value="West">West</option>
         </select>
       </div>
 
@@ -160,8 +156,8 @@ export async function renderAdminDashboard(container) {
     </div>
   `;
 
-  // Populate CCI dropdown options
-  await populateCciOptions();
+  // Populate CCI and Region dropdown options from cci_master
+  await populateFilters();
 
   // Attach filter listeners
   document.getElementById("admin-filter-cci")?.addEventListener("change", (e) => {
@@ -209,24 +205,46 @@ export async function renderAdminDashboard(container) {
 }
 
 /**
- * Populate CCI filter dropdown
+ * Populate CCI and Region filter dropdowns dynamically from cci_master
  */
-async function populateCciOptions() {
-  const select = document.getElementById("admin-filter-cci");
-  if (!select) return;
+async function populateFilters() {
+  const cciSelect = document.getElementById("admin-filter-cci");
+  const regSelect = document.getElementById("admin-filter-region");
+  if (!cciSelect && !regSelect) return;
 
   try {
-    const { data } = await supabase.from("cci_master").select("cci_code, cci_name").order("cci_code");
+    const { data } = await supabase.from("cci_master").select("cci_code, cci_name, region").order("cci_code");
     if (data) {
-      data.forEach((c) => {
-        const opt = document.createElement("option");
-        opt.value = c.cci_code;
-        opt.textContent = `${c.cci_code} - ${c.cci_name}`;
-        select.appendChild(opt);
-      });
+      if (cciSelect) {
+        // Keep "All CCIs" as first option
+        data.forEach((c) => {
+          const opt = document.createElement("option");
+          opt.value = c.cci_code;
+          opt.textContent = `${c.cci_code} - ${c.cci_name}`;
+          cciSelect.appendChild(opt);
+        });
+      }
+
+      if (regSelect) {
+        // Collect all distinct regions mapped against station codes
+        const uniqueRegions = Array.from(
+          new Set(
+            data
+              .map((c) => (c.region || "").trim())
+              .filter((r) => r.length > 0)
+          )
+        ).sort();
+
+        uniqueRegions.forEach((reg) => {
+          const opt = document.createElement("option");
+          opt.value = reg;
+          opt.textContent = reg;
+          regSelect.appendChild(opt);
+        });
+      }
     }
   } catch (err) {
-    console.warn("Could not load CCI options:", err);
+    console.warn("Could not load filter options from cci_master:", err);
   }
 }
 

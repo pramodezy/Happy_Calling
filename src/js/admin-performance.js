@@ -79,10 +79,6 @@ export async function renderAdminPerformancePage(container) {
           
           <select id="perf-region-filter" class="filter-select" style="font-size:0.8125rem; padding:5px 10px;">
             <option value="">All Regions</option>
-            <option value="North">North</option>
-            <option value="South">South</option>
-            <option value="East">East</option>
-            <option value="West">West</option>
           </select>
 
           <select id="perf-tier-filter" class="filter-select" style="font-size:0.8125rem; padding:5px 10px;">
@@ -207,6 +203,28 @@ async function loadPerformanceMetrics() {
         subtitle: "SLA Risk Stations",
       })}
     `;
+
+    // Dynamically populate Region options from actual station mapping
+    const regSelect = document.getElementById("perf-region-filter");
+    if (regSelect && regSelect.options.length <= 1) {
+      const currentVal = filterRegion;
+      regSelect.innerHTML = `<option value="">All Regions</option>`;
+      const uniqueRegions = Array.from(
+        new Set(
+          allCciData
+            .map((c) => (c.region || "").trim())
+            .filter((r) => r.length > 0)
+        )
+      ).sort();
+
+      uniqueRegions.forEach((reg) => {
+        const opt = document.createElement("option");
+        opt.value = reg;
+        opt.textContent = reg;
+        if (reg === currentVal) opt.selected = true;
+        regSelect.appendChild(opt);
+      });
+    }
 
     renderCompareChart(allCciData.slice(0, 12));
     renderFilteredTable();

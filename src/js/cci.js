@@ -223,8 +223,36 @@ function attachCciActions(mount, totalRecords, currentCcis) {
   });
 }
 
-function showCciFormModal(cci = null) {
+async function showCciFormModal(cci = null) {
   const isEditing = !!cci;
+
+  // Load existing regions from cci_master dynamically
+  let regionOptions = ["North", "South", "East", "West", "Central"];
+  try {
+    const { data: cciList } = await supabase.from("cci_master").select("region");
+    if (cciList) {
+      const dbRegions = Array.from(
+        new Set(
+          cciList
+            .map((c) => (c.region || "").trim())
+            .filter((r) => r.length > 0)
+        )
+      ).sort();
+      if (dbRegions.length > 0) {
+        regionOptions = dbRegions;
+      }
+    }
+  } catch (e) {
+    console.warn("Could not load dynamic regions for modal:", e);
+  }
+
+  if (cci?.region && !regionOptions.includes(cci.region)) {
+    regionOptions.push(cci.region);
+  }
+
+  const regionOptionsHtml = regionOptions
+    .map((r) => `<option value="${escapeHtml(r)}" ${cci?.region === r ? "selected" : ""}>${escapeHtml(r)}</option>`)
+    .join("");
 
   const contentHtml = `
     <form id="cci-form">
@@ -241,11 +269,7 @@ function showCciFormModal(cci = null) {
       <div class="form-group">
         <label for="cci-region-input" class="form-label">Region *</label>
         <select id="cci-region-input" class="form-select" required>
-          <option value="North" ${cci?.region === "North" ? "selected" : ""}>North</option>
-          <option value="South" ${cci?.region === "South" ? "selected" : ""}>South</option>
-          <option value="East" ${cci?.region === "East" ? "selected" : ""}>East</option>
-          <option value="West" ${cci?.region === "West" ? "selected" : ""}>West</option>
-          <option value="Central" ${cci?.region === "Central" ? "selected" : ""}>Central</option>
+          ${regionOptionsHtml}
         </select>
       </div>
 
