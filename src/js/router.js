@@ -61,7 +61,8 @@ export async function handleRouteChange() {
 
   let hash = window.location.hash || "";
   if (!hash || hash === "#" || hash === "#/") {
-    hash = isAdmin() ? "#/admin" : "#/dashboard";
+    const profile = getCurrentProfile();
+    hash = profile ? (profile.role === "ADMIN" ? "#/admin" : "#/dashboard") : "#/login";
     window.location.hash = hash;
     return;
   }

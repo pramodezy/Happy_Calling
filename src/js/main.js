@@ -39,5 +39,9 @@ window.addEventListener("unhandledrejection", (event) => {
   // Prevent noisy default alert if handled gracefully
 });
 
-// Boot the portal
-document.addEventListener("DOMContentLoaded", startApplication);
+// Boot the portal safely even if DOM is already parsed
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", startApplication);
+} else {
+  startApplication();
+}
