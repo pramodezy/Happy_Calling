@@ -12,6 +12,9 @@ import { renderPendingPage } from "./pending.js";
 import { renderCompletedPage } from "./completed.js";
 import { renderPerformancePage } from "./performance.js";
 import { renderAdminDashboard, cleanupAdminDashboard } from "./admin.js";
+import { renderAdminPerformancePage, cleanupAdminPerformance } from "./admin-performance.js";
+import { renderAdminAgeingPage, cleanupAdminAgeing } from "./admin-ageing.js";
+import { renderAdminFeedbackPage, cleanupAdminFeedback } from "./admin-feedback.js";
 import { renderUsersPage } from "./users.js";
 import { renderCciPage } from "./cci.js";
 import { renderClosuresPage } from "./closures.js";
@@ -32,11 +35,11 @@ const routes = {
   "#/performance": { render: renderPerformancePage, requiresAuth: true },
   "#/profile": { render: renderProfilePage, requiresAuth: true },
 
-  // Admin Routes
+  // Admin Routes (Analytics & Monitoring)
   "#/admin": { render: renderAdminDashboard, requiresAuth: true, adminOnly: true },
-  "#/admin/performance": { render: renderAdminDashboard, requiresAuth: true, adminOnly: true },
-  "#/admin/ageing": { render: renderAdminDashboard, requiresAuth: true, adminOnly: true },
-  "#/admin/feedback": { render: renderAdminDashboard, requiresAuth: true, adminOnly: true },
+  "#/admin/performance": { render: renderAdminPerformancePage, requiresAuth: true, adminOnly: true },
+  "#/admin/ageing": { render: renderAdminAgeingPage, requiresAuth: true, adminOnly: true },
+  "#/admin/feedback": { render: renderAdminFeedbackPage, requiresAuth: true, adminOnly: true },
   "#/admin/closures": { render: renderClosuresPage, requiresAuth: true, adminOnly: true },
   "#/admin/import": { render: renderImportPage, requiresAuth: true, adminOnly: true },
   "#/admin/happy-calling": { render: renderHappyCallingPage, requiresAuth: true, adminOnly: true },
@@ -58,6 +61,9 @@ export function initRouter() {
  */
 export async function handleRouteChange() {
   cleanupAdminDashboard();
+  cleanupAdminPerformance();
+  cleanupAdminAgeing();
+  cleanupAdminFeedback();
 
   let hash = window.location.hash || "";
   if (!hash || hash === "#" || hash === "#/") {

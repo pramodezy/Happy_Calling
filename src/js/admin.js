@@ -31,13 +31,22 @@ export async function renderAdminDashboard(container) {
         <p style="font-size:0.875rem; color:var(--text-secondary);">Company-wide Happy Calling operations, CCI partner rankings, and customer sentiment analytics.</p>
       </div>
 
-      <div style="display:flex; gap:0.5rem;">
+      <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <a href="#/admin/performance" class="btn-secondary" style="padding:7px 12px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;">
+          <span style="width:16px; height:16px;">${icons.award}</span>
+          <span>CCI Performance</span>
+        </a>
+        <a href="#/admin/ageing" class="btn-secondary" style="padding:7px 12px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;">
+          <span style="width:16px; height:16px;">${icons.clock}</span>
+          <span>Pending Ageing</span>
+        </a>
+        <a href="#/admin/feedback" class="btn-secondary" style="padding:7px 12px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;">
+          <span style="width:16px; height:16px;">${icons.smile}</span>
+          <span>Feedback</span>
+        </a>
         <a href="#/admin/import" class="btn-primary" style="padding:7px 14px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;">
           <span style="width:16px; height:16px;">${icons.upload}</span>
           <span>Import Closures</span>
-        </a>
-        <a href="#/admin/closures" class="btn-secondary" style="padding:7px 14px; font-size:0.8125rem;">
-          <span>Closure DB</span>
         </a>
       </div>
     </div>
@@ -115,11 +124,15 @@ export async function renderAdminDashboard(container) {
 
     <!-- CCI Performance Table & Leaderboard -->
     <div class="table-card">
-      <div class="table-card-header">
+      <div class="table-card-header" style="flex-wrap:wrap; gap:0.5rem;">
         <div>
-          <h3 class="table-card-title">CCI Partner Performance Table & Leaderboard</h3>
+          <h3 class="table-card-title">Top CCI Partners Snapshot</h3>
           <span style="font-size:0.75rem; color:var(--text-tertiary);">Ranked by Completion % and Happy Calling CSAT</span>
         </div>
+        <a href="#/admin/performance" class="btn-secondary" style="padding:5px 12px; font-size:0.75rem; display:flex; align-items:center; gap:0.35rem;">
+          <span>View Full Leaderboard & Export</span>
+          <span>→</span>
+        </a>
       </div>
 
       <div class="table-responsive-wrapper">
