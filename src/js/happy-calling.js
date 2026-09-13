@@ -256,12 +256,6 @@ function renderCallingForm(mount, closure) {
           <h3 style="font-size:1.25rem; font-weight:700; color:var(--text-primary); margin-top:0.25rem;">
             ${escapeHtml(closure.customer_name || "Valued Motorola Customer")}
           </h3>
-
-          <div style="margin-top:0.4rem;">
-            <span style="font-family:monospace; font-weight:700; font-size:0.875rem; color:var(--moto-blue-accent); background:rgba(0,114,206,0.08); padding:3px 8px; border-radius:4px; border:1px solid rgba(0,114,206,0.2);">
-              SO: ${escapeHtml(closure.so_number)}
-            </span>
-          </div>
         </div>
         <div>
           ${renderAgeingBadge(ageingDays)}
@@ -295,11 +289,6 @@ function renderCallingForm(mount, closure) {
         <div class="customer-meta-item">
           <span class="meta-label">Repair Type</span>
           <div class="meta-value" style="margin-top:2px;">${renderRepairBadge(repairType)}</div>
-        </div>
-
-        <div class="customer-meta-item">
-          <span class="meta-label">Closure ID</span>
-          <span class="meta-value" style="font-family:monospace;">${escapeHtml(closure.closure_id)}</span>
         </div>
 
         <div class="customer-meta-item">
