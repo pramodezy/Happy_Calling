@@ -59,31 +59,39 @@ async function loadPerformanceData() {
     if (error) throw error;
     if (!data) return;
 
+    const completionRate = data.completion_rate !== undefined && data.completion_rate !== null ? data.completion_rate : 0;
+    const happyRate = data.happy_rate !== undefined && data.happy_rate !== null ? data.happy_rate : 0;
+    const unhappyRate = data.unhappy_rate !== undefined && data.unhappy_rate !== null ? data.unhappy_rate : 0;
+    const avgRating = data.avg_rating !== undefined && data.avg_rating !== null ? data.avg_rating : 0;
+    const completedCalls = Number(data.completed_calls) || 0;
+    const totalClosures = Number(data.total_closures) || 0;
+    const unhappyCount = Number(data.unhappy_count) || 0;
+
     kpiMount.innerHTML = `
       ${renderKpiCard({
         title: "Completion Ratio",
-        value: `${data.completion_rate}%`,
+        value: `${completionRate}%`,
         icon: icons.award,
-        colorScheme: data.completion_rate >= 90 ? "green" : "amber",
-        subtitle: `${data.completed_calls} / ${data.total_closures} closed`,
+        colorScheme: Number(completionRate) >= 90 ? "green" : "amber",
+        subtitle: `${completedCalls} / ${totalClosures} closed`,
       })}
       ${renderKpiCard({
         title: "Happy Customer %",
-        value: `${data.happy_rate}%`,
+        value: `${happyRate}%`,
         icon: icons.smile,
         colorScheme: "green",
         subtitle: "Customer Delighted",
       })}
       ${renderKpiCard({
         title: "DSAT (Unhappy) %",
-        value: `${data.unhappy_rate}%`,
+        value: `${unhappyRate}%`,
         icon: icons.frown,
-        colorScheme: data.unhappy_rate < 5 ? "green" : "red",
-        subtitle: `${data.unhappy_count} Escalations`,
+        colorScheme: Number(unhappyRate) < 5 ? "green" : "red",
+        subtitle: `${unhappyCount} Escalations`,
       })}
       ${renderKpiCard({
         title: "Average Score",
-        value: `${data.avg_rating} / 10`,
+        value: `${avgRating} / 10`,
         icon: icons.award,
         colorScheme: "blue",
         subtitle: "Overall Satisfaction",

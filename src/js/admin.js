@@ -249,63 +249,74 @@ export async function loadAdminMetrics() {
     if (error) throw error;
     if (!data) return;
 
-    // 8 Admin KPI cards:
-    // Total Closures, Completed Calls, Pending Calls, Completion %, Happy %, Neutral %, Unhappy %, Average Rating
+    const totalClosures = Number(data.total_closures) || 0;
+    const completedCalls = Number(data.completed_calls) || 0;
+    const pendingCalls = Number(data.pending_calls) || 0;
+    const completionRate = data.completion_rate !== undefined && data.completion_rate !== null ? data.completion_rate : 0;
+    const happyRate = data.happy_rate !== undefined && data.happy_rate !== null ? data.happy_rate : 0;
+    const neutralRate = data.neutral_rate !== undefined && data.neutral_rate !== null ? data.neutral_rate : 0;
+    const unhappyRate = data.unhappy_rate !== undefined && data.unhappy_rate !== null ? data.unhappy_rate : 0;
+    const happyCount = Number(data.happy_count) || 0;
+    const neutralCount = Number(data.neutral_count) || 0;
+    const unhappyCount = Number(data.unhappy_count) || 0;
+    const avgRating = data.avg_rating !== undefined && data.avg_rating !== null ? data.avg_rating : 0;
+
+    // 8 Admin KPI cards
     kpiMount.innerHTML = `
       ${renderKpiCard({
         title: "Total Closures",
-        value: Number(data.total_closures).toLocaleString(),
+        value: totalClosures.toLocaleString(),
         icon: icons.database,
         colorScheme: "blue",
         subtitle: "Motorola Closed Jobs",
       })}
       ${renderKpiCard({
         title: "Completed Calls",
-        value: Number(data.completed_calls).toLocaleString(),
+        value: completedCalls.toLocaleString(),
         icon: icons.checkCircle,
         colorScheme: "green",
         subtitle: "Verified Happy Calls",
       })}
       ${renderKpiCard({
         title: "Pending Calls",
-        value: Number(data.pending_calls).toLocaleString(),
+        value: pendingCalls.toLocaleString(),
         icon: icons.clock,
         colorScheme: "amber",
         subtitle: "Across All CCIs",
       })}
       ${renderKpiCard({
         title: "Completion %",
-        value: `${data.completion_rate}%`,
+        value: `${completionRate}%`,
         icon: icons.award,
-        colorScheme: data.completion_rate >= 90 ? "green" : "purple",
+        colorScheme: Number(completionRate) >= 90 ? "green" : "purple",
         subtitle: "National Benchmark: 95%",
       })}
       ${renderKpiCard({
         title: "Happy %",
-        value: `${data.happy_rate}%`,
+        value: `${happyRate}%`,
         icon: icons.smile,
         colorScheme: "green",
-        subtitle: `${data.happy_count} Delighted Customers`,
+        subtitle: `${happyCount.toLocaleString()} Delighted Customers`,
       })}
       ${renderKpiCard({
         title: "Neutral %",
-        value: `${data.neutral_rate}%`,
+        value: `${neutralRate}%`,
         icon: icons.meh,
         colorScheme: "blue",
-        subtitle: `${data.neutral_count} Neutral Feedback`,
+        subtitle: `${neutralCount.toLocaleString()} Neutral Feedback`,
       })}
       ${renderKpiCard({
         title: "Unhappy %",
-        value: `${data.unhappy_rate}%`,
+        value: `${unhappyRate}%`,
         icon: icons.frown,
-        colorScheme: data.unhappy_rate > 5 ? "red" : "amber",
-        subtitle: `${data.unhappy_count} DSAT Escalations`,
+        colorScheme: Number(unhappyRate) > 5 ? "red" : "amber",
+        subtitle: `${unhappyCount.toLocaleString()} DSAT Escalations`,
       })}
       ${renderKpiCard({
         title: "Average Rating",
-        value: `${data.avg_rating} <span style="font-size:1.1rem; color:var(--text-tertiary);">/10</span>`,
+        value: `${avgRating} <span style="font-size:1.1rem; color:var(--text-tertiary);">/10</span>`,
         icon: icons.award,
-        colorScheme: data.avg_rating >= 8 ? "green" : "amber",
+        colorScheme: Number(avgRating) >= 8 ? "green" : "amber",
         subtitle: "National Customer CSAT",
       })}
     `;
