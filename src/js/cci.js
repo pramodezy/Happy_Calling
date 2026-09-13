@@ -114,9 +114,6 @@ export async function loadCciTable() {
             </td>
             <td style="text-align:right;">
               <div style="display:inline-flex; gap:0.35rem;">
-                <button type="button" class="btn-secondary btn-pw-cci" data-code="${escapeHtml(c.cci_code)}" data-name="${escapeHtml(c.cci_name)}" style="padding:4px 8px; font-size:0.75rem;" title="Manage / Regenerate Station Password">
-                  🔑 Credentials
-                </button>
                 <button type="button" class="btn-secondary btn-edit-cci" data-id="${c.id}" style="padding:4px 8px; font-size:0.75rem;">
                   Edit
                 </button>
@@ -188,15 +185,6 @@ function attachCciActions(mount, totalRecords, currentCcis) {
       }, 300)
     );
   }
-
-  // Manage Credentials for Station
-  mount.querySelectorAll(".btn-pw-cci").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const code = btn.getAttribute("data-code");
-      const name = btn.getAttribute("data-name");
-      showCciCredentialsModal(code, name);
-    });
-  });
 
   // Edit CCI
   mount.querySelectorAll(".btn-edit-cci").forEach((btn) => {
@@ -715,13 +703,6 @@ GRANT EXECUTE ON FUNCTION public.admin_reset_cci_password(TEXT, TEXT) TO authent
           </div>
         </div>
 
-        <div style="margin-top:0.75rem; background:var(--bg-surface-subtle); border:1px solid var(--border-subtle); border-radius:6px; padding:0.75rem;">
-          <div style="font-size:0.75rem; font-weight:600; color:var(--text-secondary); margin-bottom:0.25rem;">
-            🔑 Supabase Service Role Key (Optional — enables direct browser creation without opening Supabase SQL Editor):
-          </div>
-          <input type="password" id="input-service-role-key" class="form-input" style="font-size:0.75rem; padding:6px 10px;" placeholder="Paste service_role secret from Supabase Dashboard > Project Settings > API">
-        </div>
-
         <div id="region-ingest-status" style="margin-top:1rem;"></div>
       `;
 
@@ -750,16 +731,14 @@ GRANT EXECUTE ON FUNCTION public.admin_reset_cci_password(TEXT, TEXT) TO authent
         showToast("SQL script downloaded!", "success");
       });
 
-      // Push via App Action
+      // Push Stations to Database Action
       mount.querySelector("#btn-confirm-region-ingest")?.addEventListener("click", async () => {
         const btn = mount.querySelector("#btn-confirm-region-ingest");
         const statusDiv = mount.querySelector("#region-ingest-status");
-        const serviceRoleKey = mount.querySelector("#input-service-role-key")?.value?.trim() || localStorage.getItem("__MOTO_SU_SERVICE_ROLE_KEY__") || "";
         btn.disabled = true;
-        statusDiv.innerHTML = renderSpinner(`Pushing records to Supabase (${parsedStations.length} stations)...`);
+        statusDiv.innerHTML = renderSpinner(`Saving ${parsedStations.length} stations to cci_master...`);
 
         try {
-          // 1. Always upsert stations into cci_master first
           let cciUpsertCount = 0;
           for (const st of parsedStations) {
             const { error: cciErr } = await supabase.from("cci_master").upsert(
@@ -775,133 +754,21 @@ GRANT EXECUTE ON FUNCTION public.admin_reset_cci_password(TEXT, TEXT) TO authent
             if (!cciErr) cciUpsertCount++;
           }
 
-          let usersCreated = 0;
-          let methodUsed = "";
-          let errorDetail = null;
-
-          // Method A: If service role key is provided, use Supabase Admin API directly
-          if (serviceRoleKey) {
-            localStorage.setItem("__MOTO_SU_SERVICE_ROLE_KEY__", serviceRoleKey);
-            statusDiv.innerHTML = renderSpinner(`Creating Auth accounts via Supabase Admin API...`);
-            const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL || window.__SUPABASE_URL__ || localStorage.getItem("__MOTO_SU_URL__");
-            const { createClient } = await import("@supabase/supabase-js");
-            const adminClient = createClient(supabaseUrl, serviceRoleKey, {
-              auth: { persistSession: false, autoRefreshToken: false },
-            });
-
-            for (const st of parsedStations) {
-              const username = `cci_${st.station_code.toLowerCase().replace(/^(cci[_-]?)/i, "")}`;
-              const email = `${username}@happycalling.in`;
-              try {
-                const { data: userData, error: createErr } = await adminClient.auth.admin.createUser({
-                  email: email,
-                  password: "Moto@123",
-                  email_confirm: true,
-                  user_metadata: {
-                    user_name: username,
-                    username: username,
-                    role: "CCI_USER",
-                    cci_code: st.station_code,
-                  },
-                });
-
-                if (userData?.user) {
-                  usersCreated++;
-                  await adminClient.from("user_profiles").upsert(
-                    {
-                      auth_user_id: userData.user.id,
-                      user_name: username,
-                      role: "CCI_USER",
-                      cci_code: st.station_code,
-                      cci_name: st.station_name,
-                      status: "ACTIVE",
-                    },
-                    { onConflict: "auth_user_id" }
-                  );
-                } else if (createErr) {
-                  console.warn(`Admin createUser error for ${username}:`, createErr.message);
-                }
-              } catch (e) {
-                console.warn(`Admin createUser exception for ${username}:`, e);
-              }
-            }
-            methodUsed = "Admin REST API (Service Role)";
-          } else {
-            // Method B: Try database RPC function bulk_create_station_cci_users
-            try {
-              const { data: rpcData, error: rpcError } = await supabase.rpc("bulk_create_station_cci_users", {
-                p_stations: parsedStations,
-                p_default_password: "Moto@123",
-              });
-
-              if (!rpcError && rpcData?.success) {
-                usersCreated = rpcData.users_created || 0;
-                methodUsed = "Database RPC Function";
-              } else if (rpcError) {
-                errorDetail = rpcError.message || formatSupabaseError(rpcError);
-              }
-            } catch (rpcEx) {
-              errorDetail = rpcEx.message;
-            }
-          }
-
-          if (usersCreated > 0) {
-            showToast(`Success! ${usersCreated} Supabase Auth users created!`, "success");
-            statusDiv.innerHTML = `
-              <div style="padding:1.25rem; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; color:#065f46; font-size:0.875rem;">
-                <strong style="font-size:1rem;">✅ Stations & Supabase Auth Users Created Successfully!</strong>
-                <div style="margin-top:0.5rem; line-height:1.6;">
-                  &bull; Configured in <code>cci_master</code>: <strong>${cciUpsertCount}</strong>
-                  <br>&bull; Created in Supabase <code>auth.users</code>: <strong>${usersCreated}</strong>
-                  <br>&bull; Username Format: <code>cci_&lt;station_code&gt;</code> (e.g. <code>cci_65</code>)
-                  <br>&bull; Default Password: <code>Moto@123</code>
-                  <br>&bull; Method: <strong>${methodUsed}</strong>
-                </div>
-                <div style="margin-top:1rem;">
-                  <button type="button" class="btn-primary" id="btn-finish-region-import" style="padding:6px 16px; font-size:0.875rem;">
-                    Done & Refresh CCI List
-                  </button>
-                </div>
+          showToast(`Success! ${cciUpsertCount} stations saved to database.`, "success");
+          statusDiv.innerHTML = `
+            <div style="padding:1.25rem; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; color:#065f46; font-size:0.875rem;">
+              <strong style="font-size:1rem;">✅ ${cciUpsertCount} Stations Saved to Database!</strong>
+              <div style="margin-top:0.5rem; line-height:1.6;">
+                &bull; All stations are registered in <code>cci_master</code> and active.
+                <br>&bull; User accounts and passwords can be managed in the <strong>Supabase Dashboard (Authentication &rarr; Users)</strong> or batch-generated using the <strong>Copy Supabase SQL</strong> button above.
               </div>
-            `;
-          } else {
-            statusDiv.innerHTML = `
-              <div style="padding:1.25rem; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; color:#92400e; font-size:0.875rem;">
-                <strong style="font-size:1rem; color:#b45309;">⚠️ Stations Saved, but Auth Users Require SQL Editor Run</strong>
-                <div style="margin-top:0.5rem; line-height:1.6;">
-                  &bull; <strong>${cciUpsertCount} stations</strong> were successfully updated in <code>cci_master</code>.
-                  <br>&bull; Direct creation of Auth users from browser was prevented by Supabase: 
-                  <code style="background:#fef3c7; padding:2px 4px; border-radius:4px;">${escapeHtml(errorDetail || "RPC function bulk_create_station_cci_users not installed in Supabase")}</code>
-                </div>
-
-                <div style="margin-top:1rem; padding:1rem; background:#ffffff; border:1px solid #fcd34d; border-radius:6px;">
-                  <strong style="color:#1e293b;">👉 Complete Setup in 10 Seconds via Supabase SQL Editor:</strong>
-                  <ol style="margin:0.5rem 0 0.75rem 1.25rem; line-height:1.6; color:#334155; font-size:0.8125rem;">
-                    <li>Click the <strong>"Copy Supabase SQL"</strong> button below.</li>
-                    <li>Go to your <strong>Supabase Dashboard &rarr; SQL Editor</strong>.</li>
-                    <li>Click <strong>New Query</strong>, paste the copied SQL, and click <strong>Run</strong>.</li>
-                    <li>All <strong>${parsedStations.length} users</strong> (e.g. <code>cci_65</code>) will instantly appear in Supabase <strong>Authentication &rarr; Users</strong>!</li>
-                  </ol>
-                  <button type="button" id="btn-copy-supabase-sql-fallback" class="btn-primary" style="background:#0284c7; border:none; padding:8px 18px; font-weight:600; font-size:0.875rem;">
-                    📋 Copy Supabase SQL Script Now
-                  </button>
-                </div>
-
-                <div style="margin-top:1rem;">
-                  <button type="button" class="btn-secondary" id="btn-finish-region-import" style="padding:6px 16px; font-size:0.875rem;">
-                    Close & View Stations
-                  </button>
-                </div>
+              <div style="margin-top:1rem;">
+                <button type="button" class="btn-primary" id="btn-finish-region-import" style="padding:6px 16px; font-size:0.875rem;">
+                  Done & Refresh CCI List
+                </button>
               </div>
-            `;
-
-            statusDiv.querySelector("#btn-copy-supabase-sql-fallback")?.addEventListener("click", () => {
-              const sql = buildSupabaseBulkSql(parsedStations);
-              navigator.clipboard.writeText(sql).then(() => {
-                showToast(`SQL copied! Paste in Supabase SQL Editor and click RUN.`, "success");
-              });
-            });
-          }
+            </div>
+          `;
 
           statusDiv.querySelector("#btn-finish-region-import")?.addEventListener("click", () => {
             closeModal();
@@ -926,138 +793,3 @@ GRANT EXECUTE ON FUNCTION public.admin_reset_cci_password(TEXT, TEXT) TO authent
   reader.readAsArrayBuffer(file);
 }
 
-/**
- * Manage / Regenerate Station Credentials Modal
- */
-function showCciCredentialsModal(cciCode, cciName) {
-  const cleanCode = cciCode.toLowerCase().replace(/^(cci[_-]?)/i, "");
-  const username = `cci_${cleanCode}`;
-  const defaultPw = `Moto@${Math.floor(1000 + Math.random() * 9000)}`;
-
-  const contentHtml = `
-    <div style="margin-bottom:1rem;">
-      <p style="font-size:0.875rem; color:var(--text-secondary);">
-        Manage portal login credentials for Station <strong>${escapeHtml(cciCode)}</strong> (${escapeHtml(cciName)}).
-      </p>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">Station Login Username</label>
-      <input type="text" class="form-input" readonly value="${escapeHtml(username)}" style="font-family:monospace; background:var(--bg-surface-subtle); font-weight:700; color:var(--moto-blue-accent);">
-      <div style="font-size:0.75rem; color:var(--text-tertiary); margin-top:2px;">
-        The station user logs in directly with this username.
-      </div>
-    </div>
-
-    <div class="form-group">
-      <label for="input-cci-pw" class="form-label" style="display:flex; justify-content:space-between; align-items:center;">
-        <span>Set / Regenerate Password *</span>
-        <button type="button" id="btn-gen-cci-pw" class="btn-secondary" style="padding:2px 8px; font-size:0.75rem;">
-          🎲 Generate Random
-        </button>
-      </label>
-      <input type="text" id="input-cci-pw" class="form-input" value="${defaultPw}" minlength="6" placeholder="Min 6 characters">
-    </div>
-
-    <div id="cci-pw-result" style="margin-top:1rem;"></div>
-  `;
-
-  const footerHtml = `
-    <button type="button" class="btn-secondary" id="btn-close-cci-pw">Close</button>
-    <button type="button" class="btn-primary" id="btn-save-cci-pw">Update & Share Password</button>
-  `;
-
-  const overlay = openModal({
-    title: `Station Credentials: ${cciCode}`,
-    contentHtml,
-    footerHtml,
-    size: "medium",
-  });
-
-  const inputPw = overlay.querySelector("#input-cci-pw");
-  const resultDiv = overlay.querySelector("#cci-pw-result");
-
-  overlay.querySelector("#btn-gen-cci-pw")?.addEventListener("click", () => {
-    inputPw.value = `Moto@${Math.floor(1000 + Math.random() * 9000)}`;
-  });
-
-  overlay.querySelector("#btn-close-cci-pw")?.addEventListener("click", closeModal);
-
-  overlay.querySelector("#btn-save-cci-pw")?.addEventListener("click", async () => {
-    const newPassword = inputPw.value.trim();
-    if (!newPassword || newPassword.length < 6) {
-      showToast("Password must be at least 6 characters.", "warning");
-      return;
-    }
-
-    const saveBtn = overlay.querySelector("#btn-save-cci-pw");
-    saveBtn.disabled = true;
-    saveBtn.textContent = "Updating...";
-    resultDiv.innerHTML = renderSpinner("Updating password in Supabase...");
-
-    let success = false;
-    let errorMsg = null;
-
-    try {
-      const { data: rpcData, error: rpcErr } = await supabase.rpc("admin_reset_cci_password", {
-        p_cci_code: cciCode,
-        p_new_password: newPassword,
-      });
-
-      if (!rpcErr && rpcData?.success) {
-        success = true;
-      } else if (rpcErr) {
-        errorMsg = rpcErr.message;
-      }
-    } catch (e) {
-      errorMsg = e.message;
-    }
-
-    if (success) {
-      showToast(`Password updated for ${username}!`, "success");
-      saveBtn.style.display = "none";
-
-      const portalUrl = window.location.origin + window.location.pathname;
-      const shareText = `📱 MOTOROLA HAPPY CALLING - STATION LOGIN CREDENTIALS
---------------------------------------------------
-Portal URL:   ${portalUrl}
-Username:     ${username}
-Password:     ${newPassword}
-Station Code: ${cciCode}
-Center Name:  ${cciName}
---------------------------------------------------
-Login at the portal using your Username and Password.`;
-
-      resultDiv.innerHTML = `
-        <div style="padding:1rem; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; color:#065f46; font-size:0.875rem;">
-          <strong style="color:#047857;">✅ Password Updated in Supabase!</strong>
-          <p style="margin:0.25rem 0 0.75rem; font-size:0.8125rem; color:#065f46;">
-            Copy credentials below to share with the station:
-          </p>
-          <pre style="background:#ffffff; border:1px solid #a7f3d0; border-radius:6px; padding:0.75rem; font-family:monospace; font-size:0.8125rem; line-height:1.5; color:#1e293b; white-space:pre-wrap;">${escapeHtml(shareText)}</pre>
-          <button type="button" id="btn-copy-cci-share-creds" class="btn-primary" style="margin-top:0.75rem; width:100%; justify-content:center; padding:8px 14px; font-weight:600; font-size:0.8125rem;">
-            📋 Copy Credentials to Clipboard
-          </button>
-        </div>
-      `;
-
-      resultDiv.querySelector("#btn-copy-cci-share-creds")?.addEventListener("click", () => {
-        navigator.clipboard.writeText(shareText).then(() => {
-          showToast("Credentials copied! Ready to share via WhatsApp / Email.", "success");
-        });
-      });
-    } else {
-      saveBtn.disabled = false;
-      saveBtn.textContent = "Retry Update";
-
-      resultDiv.innerHTML = `
-        <div style="padding:1rem; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; color:#92400e; font-size:0.8125rem;">
-          <strong>RPC Error:</strong> ${escapeHtml(errorMsg || "Function admin_reset_cci_password not found.")}
-          <div style="margin-top:0.5rem; line-height:1.5;">
-            Run migration <code>20260913000001_bulk_create_station_cci_users.sql</code> in Supabase SQL Editor once to enable 1-click password resets for any station.
-          </div>
-        </div>
-      `;
-    }
-  });
-}

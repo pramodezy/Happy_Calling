@@ -170,9 +170,6 @@ export async function loadUsersTable() {
             <td><span style="font-size:0.8125rem;">${formatDateTime(u.created_at)}</span></td>
             <td style="text-align:right;">
               <div style="display:inline-flex; gap:0.35rem;">
-                <button type="button" class="btn-secondary btn-reset-pw" data-id="${u.auth_user_id}" data-name="${escapeHtml(u.user_name)}" data-cci="${escapeHtml(u.cci_code || "")}" style="padding:4px 8px; font-size:0.75rem;" title="Reset / Regenerate Password">
-                  🔑 Reset PW
-                </button>
                 <button type="button" class="btn-secondary btn-toggle-status" data-id="${u.id}" data-auth="${u.auth_user_id}" data-status="${u.status}" style="padding:4px 8px; font-size:0.75rem;">
                   ${isAct ? "Deactivate" : "Activate"}
                 </button>
@@ -198,15 +195,14 @@ export async function loadUsersTable() {
       ],
       rowsHtml,
       page: currentPage,
-      pageSize: PAGE_SIZE,
       totalRecords,
+      pageSize: PAGE_SIZE,
     });
 
     attachUserActions(tableMount, totalRecords);
   } catch (err) {
-    console.error("loadUsersTable error:", err);
     tableMount.innerHTML = `
-      <div style="padding:1.5rem; background:#fef2f2; border:1px solid #fecaca; border-radius:8px; color:#991b1b;">
+      <div style="padding:2rem; text-align:center; color:var(--text-danger);">
         <strong>Error loading users:</strong> ${formatSupabaseError(err)}
       </div>
     `;
@@ -248,39 +244,19 @@ function attachUserActions(mount, totalRecords) {
     btn.addEventListener("click", async () => {
       const id = btn.getAttribute("data-id");
       const authUserId = btn.getAttribute("data-auth");
-      const currentStat = btn.getAttribute("data-status");
-      const newStatus = currentStat === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+      const currentStatus = btn.getAttribute("data-status");
+      const newStatus = currentStatus === "ACTIVE" ? "INACTIVE" : "ACTIVE";
 
-      const confirmed = await confirmDialog({
-        title: `${newStatus === "ACTIVE" ? "Activate" : "Deactivate"} User`,
-        message: `Are you sure you want to mark this user account as ${newStatus}?`,
-        confirmText: newStatus === "ACTIVE" ? "Activate" : "Deactivate",
-        isDanger: newStatus === "INACTIVE",
-      });
-
-      if (confirmed) {
+      if (confirm(`Are you sure you want to ${newStatus === "ACTIVE" ? "activate" : "deactivate"} this user account?`)) {
         try {
-          const { error } = await supabase.functions.invoke("admin-users", {
-            body: { action: "toggle_status", payload: { id, authUserId, newStatus } },
-          });
-
+          const { error } = await supabase.from("user_profiles").update({ status: newStatus }).eq("id", id);
           if (error) throw error;
-          showToast(`User marked as ${newStatus}.`, "success");
+          showToast(`User status updated to ${newStatus}.`, "success");
           loadUsersTable();
         } catch (err) {
           showToast(`Action failed: ${formatSupabaseError(err)}`, "error");
         }
       }
-    });
-  });
-
-  // Reset Password Modal
-  mount.querySelectorAll(".btn-reset-pw").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const authUserId = btn.getAttribute("data-id");
-      const userName = btn.getAttribute("data-name");
-      const cciCode = btn.getAttribute("data-cci") || "";
-      showResetPasswordModal(authUserId, userName, cciCode);
     });
   });
 }
@@ -388,158 +364,6 @@ function showCreateUserModal() {
       showToast(`Failed to create user: ${formatSupabaseError(err)}`, "error");
       saveBtn.disabled = false;
       saveBtn.textContent = "Create User";
-    }
-  });
-}
-
-function showResetPasswordModal(authUserId, userName, cciCode = "") {
-  const defaultPw = `Moto@${Math.floor(1000 + Math.random() * 9000)}`;
-
-  const contentHtml = `
-    <div style="margin-bottom:1rem;">
-      <p style="font-size:0.875rem; color:var(--text-secondary);">
-        Generate or set a new password for <strong>${escapeHtml(userName)}</strong>.
-      </p>
-    </div>
-    <div class="form-group">
-      <label for="input-new-pw" class="form-label" style="display:flex; justify-content:space-between; align-items:center;">
-        <span>New Password *</span>
-        <button type="button" id="btn-generate-random-pw" class="btn-secondary" style="padding:2px 8px; font-size:0.75rem;">
-          🎲 Generate Random
-        </button>
-      </label>
-      <input type="text" id="input-new-pw" class="form-input" minlength="6" value="${defaultPw}" placeholder="Min 6 characters">
-    </div>
-    <div id="reset-pw-result" style="margin-top:1rem;"></div>
-  `;
-
-  const footerHtml = `
-    <button type="button" class="btn-secondary" id="btn-cancel-pw">Close</button>
-    <button type="button" class="btn-primary" id="btn-save-pw">Update & Share Password</button>
-  `;
-
-  const overlay = openModal({
-    title: `Reset Password: ${userName}`,
-    contentHtml,
-    footerHtml,
-    size: "medium",
-  });
-
-  const inputPw = overlay.querySelector("#input-new-pw");
-  const resultDiv = overlay.querySelector("#reset-pw-result");
-
-  overlay.querySelector("#btn-generate-random-pw")?.addEventListener("click", () => {
-    inputPw.value = `Moto@${Math.floor(1000 + Math.random() * 9000)}`;
-  });
-
-  overlay.querySelector("#btn-cancel-pw")?.addEventListener("click", closeModal);
-
-  overlay.querySelector("#btn-save-pw")?.addEventListener("click", async () => {
-    const newPassword = inputPw.value.trim();
-    if (!newPassword || newPassword.length < 6) {
-      showToast("Password must be at least 6 characters.", "warning");
-      return;
-    }
-
-    const saveBtn = overlay.querySelector("#btn-save-pw");
-    saveBtn.disabled = true;
-    saveBtn.textContent = "Updating...";
-    resultDiv.innerHTML = renderSpinner("Updating password in Supabase...");
-
-    let success = false;
-    let errorMsg = null;
-
-    // 1. Try RPC function admin_reset_user_password
-    try {
-      const { data: rpcData, error: rpcErr } = await supabase.rpc("admin_reset_user_password", {
-        p_auth_user_id: authUserId,
-        p_new_password: newPassword,
-      });
-
-      if (!rpcErr && rpcData?.success) {
-        success = true;
-      } else if (rpcErr) {
-        errorMsg = rpcErr.message;
-      }
-    } catch (e) {
-      errorMsg = e.message;
-    }
-
-    // 2. Fallback: Service role key if available in localStorage
-    if (!success) {
-      const serviceRoleKey = localStorage.getItem("__MOTO_SU_SERVICE_ROLE_KEY__");
-      const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL || window.__SUPABASE_URL__ || localStorage.getItem("__MOTO_SU_URL__");
-      if (serviceRoleKey && supabaseUrl) {
-        try {
-          const { createClient } = await import("@supabase/supabase-js");
-          const adminClient = createClient(supabaseUrl, serviceRoleKey, {
-            auth: { persistSession: false, autoRefreshToken: false },
-          });
-          const { error: adminErr } = await adminClient.auth.admin.updateUserById(authUserId, {
-            password: newPassword,
-          });
-          if (!adminErr) {
-            success = true;
-          }
-        } catch (e) {}
-      }
-    }
-
-    if (success) {
-      showToast("Password updated in Supabase!", "success");
-      saveBtn.style.display = "none";
-
-      const portalUrl = window.location.origin + window.location.pathname;
-      const shareText = `📱 MOTOROLA HAPPY CALLING PORTAL
---------------------------------------------------
-Portal URL: ${portalUrl}
-Username:   ${userName}
-Password:   ${newPassword}
-${cciCode ? `Station:    ${cciCode}\n` : ""}--------------------------------------------------
-Please save your credentials. You can change this password after logging in.`;
-
-      resultDiv.innerHTML = `
-        <div style="padding:1rem; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; color:#065f46; font-size:0.875rem;">
-          <strong style="color:#047857;">✅ Password Updated Successfully in Supabase!</strong>
-          <p style="margin:0.25rem 0 0.75rem; font-size:0.8125rem; color:#065f46;">
-            Copy the credentials card below to share with the station user:
-          </p>
-          <pre style="background:#ffffff; border:1px solid #a7f3d0; border-radius:6px; padding:0.75rem; font-family:monospace; font-size:0.8125rem; line-height:1.5; color:#1e293b; white-space:pre-wrap;">${escapeHtml(shareText)}</pre>
-          <button type="button" id="btn-copy-shared-creds" class="btn-primary" style="margin-top:0.75rem; width:100%; justify-content:center; padding:8px 14px; font-weight:600; font-size:0.8125rem;">
-            📋 Copy Credentials to Clipboard
-          </button>
-        </div>
-      `;
-
-      resultDiv.querySelector("#btn-copy-shared-creds")?.addEventListener("click", () => {
-        navigator.clipboard.writeText(shareText).then(() => {
-          showToast("Credentials copied to clipboard! Ready to paste and share.", "success");
-        });
-      });
-    } else {
-      saveBtn.disabled = false;
-      saveBtn.textContent = "Retry Update";
-
-      const fallbackSql = `UPDATE auth.users SET encrypted_password = crypt('${newPassword}', gen_salt('bf', 10)), updated_at = now() WHERE id = '${authUserId}';`;
-
-      resultDiv.innerHTML = `
-        <div style="padding:1rem; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; color:#92400e; font-size:0.8125rem;">
-          <strong>RPC Error:</strong> ${escapeHtml(errorMsg || "Function admin_reset_user_password not found in database.")}
-          <div style="margin-top:0.5rem; line-height:1.5;">
-            Run migration <code>20260913000001_bulk_create_station_cci_users.sql</code> in Supabase SQL Editor once to enable 1-click password resets, OR run this quick SQL:
-          </div>
-          <pre style="background:#ffffff; border:1px solid #fcd34d; border-radius:6px; padding:0.5rem; margin:0.5rem 0; font-size:0.75rem; overflow-x:auto;">${escapeHtml(fallbackSql)}</pre>
-          <button type="button" id="btn-copy-pw-sql" class="btn-secondary" style="padding:4px 10px; font-size:0.75rem;">
-            📋 Copy SQL to Paste in Supabase
-          </button>
-        </div>
-      `;
-
-      resultDiv.querySelector("#btn-copy-pw-sql")?.addEventListener("click", () => {
-        navigator.clipboard.writeText(fallbackSql).then(() => {
-          showToast("SQL copied to clipboard!", "success");
-        });
-      });
     }
   });
 }
