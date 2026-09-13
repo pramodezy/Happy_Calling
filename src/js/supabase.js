@@ -4,9 +4,27 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-// Retrieve environment variables configured at Vite build time or .env
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || window.__SUPABASE_URL__;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || window.__SUPABASE_ANON_KEY__;
+// Retrieve environment variables configured at Vite build time, window, or localStorage
+const getEnvVar = (key) => {
+  try {
+    if (typeof import.meta !== "undefined" && import.meta.env && import.meta.env[key]) {
+      return import.meta.env[key];
+    }
+  } catch (e) {}
+  return null;
+};
+
+const SUPABASE_URL =
+  getEnvVar("VITE_SUPABASE_URL") ||
+  window.__SUPABASE_URL__ ||
+  localStorage.getItem("__MOTO_SU_URL__") ||
+  "";
+
+const SUPABASE_ANON_KEY =
+  getEnvVar("VITE_SUPABASE_ANON_KEY") ||
+  window.__SUPABASE_ANON_KEY__ ||
+  localStorage.getItem("__MOTO_SU_KEY__") ||
+  "";
 
 // Helper to check if credentials are set
 export function isSupabaseConfigured() {
