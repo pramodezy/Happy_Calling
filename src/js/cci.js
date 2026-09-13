@@ -446,16 +446,169 @@ function handleRegionFile(file, modalOverlay) {
         return;
       }
 
+      function buildSupabaseBulkSql(stations, defaultPassword = "Moto@123") {
+        const jsonStations = JSON.stringify(stations).replace(/'/g, "''");
+        return `-- ============================================================================
+-- MOTOROLA HAPPY CALLING: DIRECT BATCH USER & CCI CREATION FOR SUPABASE
+-- Paste and Run in: Supabase Dashboard -> SQL Editor -> New Query -> Run
+-- Total Stations: ${stations.length} | Default Password: ${defaultPassword}
+-- ============================================================================
+
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+DO $$
+DECLARE
+    v_item JSONB;
+    v_code TEXT;
+    v_region TEXT;
+    v_name TEXT;
+    v_location TEXT;
+    v_email TEXT;
+    v_auth_id UUID;
+    v_encrypted_pw TEXT;
+    v_stations JSONB := '${jsonStations}'::jsonb;
+    v_inserted_users INT := 0;
+    v_existing_users INT := 0;
+    v_cci_count INT := 0;
+BEGIN
+    v_encrypted_pw := crypt('${defaultPassword}', gen_salt('bf', 10));
+
+    FOR v_item IN SELECT * FROM jsonb_array_elements(v_stations)
+    LOOP
+        v_code := UPPER(TRIM(v_item->>'station_code'));
+        v_region := TRIM(v_item->>'region');
+        v_name := TRIM(v_item->>'station_name');
+        v_location := TRIM(v_item->>'location');
+
+        IF v_code IS NOT NULL AND v_code <> '' THEN
+            IF v_region IS NULL OR v_region = '' THEN v_region := 'General'; END IF;
+            IF v_name IS NULL OR v_name = '' THEN v_name := 'Motorola Care - ' || v_code; END IF;
+            IF v_location IS NULL OR v_location = '' THEN v_location := v_region; END IF;
+
+            -- 1. Upsert into cci_master
+            INSERT INTO public.cci_master (cci_code, cci_name, region, location, status)
+            VALUES (v_code, v_name, v_region, v_location, 'ACTIVE')
+            ON CONFLICT (cci_code) DO UPDATE
+            SET region = EXCLUDED.region,
+                cci_name = EXCLUDED.cci_name,
+                location = EXCLUDED.location,
+                status = 'ACTIVE',
+                updated_at = now();
+            v_cci_count := v_cci_count + 1;
+
+            -- 2. Check Auth User
+            v_email := lower(v_code) || '@motorolacare.in';
+            SELECT id INTO v_auth_id FROM auth.users WHERE email = v_email LIMIT 1;
+
+            IF v_auth_id IS NULL THEN
+                v_auth_id := gen_random_uuid();
+
+                INSERT INTO auth.users (
+                    id,
+                    instance_id,
+                    email,
+                    encrypted_password,
+                    email_confirmed_at,
+                    raw_app_meta_data,
+                    raw_user_meta_data,
+                    created_at,
+                    updated_at,
+                    role,
+                    aud,
+                    confirmation_token,
+                    is_super_admin
+                ) VALUES (
+                    v_auth_id,
+                    '00000000-0000-0000-0000-000000000000'::uuid,
+                    v_email,
+                    v_encrypted_pw,
+                    now(),
+                    '{"provider":"email","providers":["email"]}'::jsonb,
+                    jsonb_build_object('user_name', v_name, 'role', 'CCI_USER', 'cci_code', v_code),
+                    now(),
+                    now(),
+                    'authenticated',
+                    'authenticated',
+                    encode(gen_random_bytes(32), 'hex'),
+                    false
+                );
+
+                -- 3. Register identity for Supabase GoTrue
+                BEGIN
+                    INSERT INTO auth.identities (
+                        id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at
+                    ) VALUES (
+                        v_auth_id, v_auth_id,
+                        jsonb_build_object('sub', v_auth_id::text, 'email', v_email),
+                        'email', v_email, now(), now(), now()
+                    );
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
+
+                -- 4. User Profile
+                INSERT INTO public.user_profiles (
+                    auth_user_id, user_name, role, cci_code, cci_name, status
+                ) VALUES (
+                    v_auth_id, 'CCI ' || v_code, 'CCI_USER', v_code, v_name, 'ACTIVE'
+                ) ON CONFLICT (auth_user_id) DO NOTHING;
+
+                v_inserted_users := v_inserted_users + 1;
+            ELSE
+                -- Update password if already exists
+                UPDATE auth.users
+                SET encrypted_password = v_encrypted_pw,
+                    email_confirmed_at = COALESCE(email_confirmed_at, now()),
+                    updated_at = now()
+                WHERE id = v_auth_id;
+
+                INSERT INTO public.user_profiles (
+                    auth_user_id, user_name, role, cci_code, cci_name, status
+                ) VALUES (
+                    v_auth_id, 'CCI ' || v_code, 'CCI_USER', v_code, v_name, 'ACTIVE'
+                ) ON CONFLICT (auth_user_id) DO UPDATE
+                SET cci_code = v_code, cci_name = v_name, role = 'CCI_USER', status = 'ACTIVE', updated_at = now();
+
+                v_existing_users := v_existing_users + 1;
+            END IF;
+        END IF;
+    END LOOP;
+
+    RAISE NOTICE 'SUCCESS: % CCIs processed, % new Auth users created, % users updated.', v_cci_count, v_inserted_users, v_existing_users;
+END $$;
+`;
+      }
+
       mount.innerHTML = `
+        <div style="background: linear-gradient(135deg, #1e293b, #0f172a); color: white; padding: 1rem 1.25rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #334155;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+            <div>
+              <div style="font-weight:700; font-size:0.9375rem; color:#38bdf8; display:flex; align-items:center; gap:6px;">
+                <span>✨</span> Instant Supabase Direct SQL Generator
+              </div>
+              <div style="font-size:0.8125rem; color:#94a3b8; margin-top:2px;">
+                Detected <strong>${parsedStations.length}</strong> stations from "${escapeHtml(file.name)}". Ready for 100% instant execution in Supabase Auth.
+              </div>
+            </div>
+            <div style="display:flex; gap:0.5rem;">
+              <button type="button" id="btn-copy-supabase-sql" class="btn-primary" style="background:#0284c7; border:none; padding:7px 14px; font-size:0.8125rem; font-weight:600; display:flex; align-items:center; gap:6px;">
+                <span>📋</span> Copy Supabase SQL
+              </button>
+              <button type="button" id="btn-download-supabase-sql" class="btn-secondary" style="background:#334155; color:white; border:none; padding:7px 12px; font-size:0.8125rem; display:flex; align-items:center; gap:6px;">
+                <span>💾</span> Download .sql
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--radius-lg); overflow:hidden;">
-          <div style="padding:0.75rem 1rem; background:var(--bg-surface-subtle); border-bottom:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-size:0.8125rem; font-weight:600;">Detected <strong>${parsedStations.length}</strong> Stations from "${escapeHtml(file.name)}"</span>
+          <div style="padding:0.75rem 1rem; background:var(--bg-surface-subtle); border-bottom:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+            <span style="font-size:0.8125rem; font-weight:600;">Station Preview (Showing ${Math.min(5, parsedStations.length)} of ${parsedStations.length})</span>
             <button type="button" id="btn-confirm-region-ingest" class="btn-primary" style="padding:6px 14px; font-size:0.8125rem;">
-              <span>Confirm & Ingest ${parsedStations.length} Stations & Users</span>
+              <span>⚡ Push via App & Supabase API</span>
             </button>
           </div>
 
-          <div style="max-height:220px; overflow-y:auto;">
+          <div style="max-height:180px; overflow-y:auto;">
             <table class="data-table" style="font-size:0.8125rem;">
               <thead>
                 <tr>
@@ -484,131 +637,193 @@ function handleRegionFile(file, modalOverlay) {
               </tbody>
             </table>
           </div>
+        </div>
 
-          ${
-            parsedStations.length > 5
-              ? `<div style="padding:6px 12px; font-size:0.75rem; color:var(--text-tertiary); background:var(--bg-surface-subtle);">Showing first 5 rows of ${parsedStations.length} total stations.</div>`
-              : ""
-          }
+        <div style="margin-top:0.75rem; background:var(--bg-surface-subtle); border:1px solid var(--border-subtle); border-radius:6px; padding:0.75rem;">
+          <div style="font-size:0.75rem; font-weight:600; color:var(--text-secondary); margin-bottom:0.25rem;">
+            🔑 Supabase Service Role Key (Optional — enables direct browser creation without opening Supabase SQL Editor):
+          </div>
+          <input type="password" id="input-service-role-key" class="form-input" style="font-size:0.75rem; padding:6px 10px;" placeholder="Paste service_role secret from Supabase Dashboard > Project Settings > API">
         </div>
 
         <div id="region-ingest-status" style="margin-top:1rem;"></div>
       `;
 
+      // Copy SQL Action
+      mount.querySelector("#btn-copy-supabase-sql")?.addEventListener("click", () => {
+        const sql = buildSupabaseBulkSql(parsedStations);
+        navigator.clipboard.writeText(sql).then(() => {
+          showToast(`Copied SQL for ${parsedStations.length} stations! Paste in Supabase SQL Editor and click RUN.`, "success");
+        }).catch(() => {
+          showToast("Failed to copy. Please click Download .sql instead.", "error");
+        });
+      });
+
+      // Download SQL Action
+      mount.querySelector("#btn-download-supabase-sql")?.addEventListener("click", () => {
+        const sql = buildSupabaseBulkSql(parsedStations);
+        const blob = new Blob([sql], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `supabase_bulk_station_users_${parsedStations.length}.sql`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast("SQL script downloaded!", "success");
+      });
+
+      // Push via App Action
       mount.querySelector("#btn-confirm-region-ingest")?.addEventListener("click", async () => {
         const btn = mount.querySelector("#btn-confirm-region-ingest");
         const statusDiv = mount.querySelector("#region-ingest-status");
+        const serviceRoleKey = mount.querySelector("#input-service-role-key")?.value?.trim() || localStorage.getItem("__MOTO_SU_SERVICE_ROLE_KEY__") || "";
         btn.disabled = true;
-        statusDiv.innerHTML = renderSpinner(`Updating CCI records and generating user accounts...`);
+        statusDiv.innerHTML = renderSpinner(`Pushing records to Supabase (${parsedStations.length} stations)...`);
 
         try {
-          let usersCreated = 0;
-          let cciCount = parsedStations.length;
-          let rpcSuccess = false;
+          // 1. Always upsert stations into cci_master first
+          let cciUpsertCount = 0;
+          for (const st of parsedStations) {
+            const { error: cciErr } = await supabase.from("cci_master").upsert(
+              {
+                cci_code: st.station_code,
+                cci_name: st.station_name,
+                region: st.region,
+                location: st.location,
+                status: "ACTIVE",
+              },
+              { onConflict: "cci_code" }
+            );
+            if (!cciErr) cciUpsertCount++;
+          }
 
-          // 1. Try atomic database RPC function bulk_create_station_cci_users
-          try {
-            const { data: rpcData, error: rpcError } = await supabase.rpc("bulk_create_station_cci_users", {
-              p_stations: parsedStations,
-              p_default_password: "Moto@123",
+          let usersCreated = 0;
+          let methodUsed = "";
+          let errorDetail = null;
+
+          // Method A: If service role key is provided, use Supabase Admin API directly
+          if (serviceRoleKey) {
+            localStorage.setItem("__MOTO_SU_SERVICE_ROLE_KEY__", serviceRoleKey);
+            statusDiv.innerHTML = renderSpinner(`Creating Auth accounts via Supabase Admin API...`);
+            const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL || window.__SUPABASE_URL__ || localStorage.getItem("__MOTO_SU_URL__");
+            const { createClient } = await import("@supabase/supabase-js");
+            const adminClient = createClient(supabaseUrl, serviceRoleKey, {
+              auth: { persistSession: false, autoRefreshToken: false },
             });
 
-            if (!rpcError && rpcData?.success) {
-              rpcSuccess = true;
-              usersCreated = rpcData.users_created || 0;
-              showToast(`Created ${usersCreated} Auth users directly in Supabase!`, "success");
-            }
-          } catch (e) {
-            console.warn("RPC bulk_create_station_cci_users not yet executed in DB:", e);
-          }
-
-          // 2. If RPC was not yet run in SQL editor, use client-side Supabase Auth registration
-          if (!rpcSuccess) {
-            statusDiv.innerHTML = renderSpinner(`Registering Auth users in Supabase (${parsedStations.length} stations)...`);
-
-            // Direct upsert to cci_master
             for (const st of parsedStations) {
-              await supabase.from("cci_master").upsert(
-                {
-                  cci_code: st.station_code,
-                  cci_name: st.station_name,
-                  region: st.region,
-                  location: st.location,
-                  status: "ACTIVE",
-                },
-                { onConflict: "cci_code" }
-              );
-            }
+              const email = `${st.station_code.toLowerCase()}@motorolacare.in`;
+              try {
+                const { data: userData, error: createErr } = await adminClient.auth.admin.createUser({
+                  email: email,
+                  password: "Moto@123",
+                  email_confirm: true,
+                  user_metadata: {
+                    user_name: `CCI ${st.station_code}`,
+                    role: "CCI_USER",
+                    cci_code: st.station_code,
+                  },
+                });
 
-            // Create temporary client with persistSession: false so admin is not signed out
-            const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL || window.__SUPABASE_URL__ || localStorage.getItem("__MOTO_SU_URL__");
-            const supabaseAnonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY || window.__SUPABASE_ANON_KEY__ || localStorage.getItem("__MOTO_SU_KEY__");
-
-            if (supabaseUrl && supabaseAnonKey) {
-              const { createClient } = await import("@supabase/supabase-js");
-              const tempClient = createClient(supabaseUrl, supabaseAnonKey, {
-                auth: { persistSession: false, autoRefreshToken: false },
-              });
-
-              for (const st of parsedStations) {
-                const userEmail = `${st.station_code.toLowerCase()}@motorolacare.in`;
-                try {
-                  const { data: signData, error: signErr } = await tempClient.auth.signUp({
-                    email: userEmail,
-                    password: "Moto@123",
-                    options: {
-                      data: {
-                        user_name: `CCI ${st.station_code}`,
-                        role: "CCI_USER",
-                        cci_code: st.station_code,
-                      },
+                if (userData?.user) {
+                  usersCreated++;
+                  await adminClient.from("user_profiles").upsert(
+                    {
+                      auth_user_id: userData.user.id,
+                      user_name: `CCI ${st.station_code}`,
+                      role: "CCI_USER",
+                      cci_code: st.station_code,
+                      cci_name: st.station_name,
+                      status: "ACTIVE",
                     },
-                  });
-
-                  if (!signErr && signData?.user) {
-                    usersCreated++;
-                    // Insert into public.user_profiles
-                    await supabase.from("user_profiles").upsert(
-                      {
-                        auth_user_id: signData.user.id,
-                        user_name: `CCI ${st.station_code}`,
-                        role: "CCI_USER",
-                        cci_code: st.station_code,
-                        cci_name: st.station_name,
-                        status: "ACTIVE",
-                      },
-                      { onConflict: "auth_user_id" }
-                    );
-                  }
-                } catch (userErr) {
-                  console.warn(`User ${userEmail} registration:`, userErr);
+                    { onConflict: "auth_user_id" }
+                  );
+                } else if (createErr) {
+                  console.warn(`Admin createUser error for ${email}:`, createErr.message);
                 }
+              } catch (e) {
+                console.warn(`Admin createUser exception for ${email}:`, e);
               }
             }
+            methodUsed = "Admin REST API (Service Role)";
+          } else {
+            // Method B: Try database RPC function bulk_create_station_cci_users
+            try {
+              const { data: rpcData, error: rpcError } = await supabase.rpc("bulk_create_station_cci_users", {
+                p_stations: parsedStations,
+                p_default_password: "Moto@123",
+              });
+
+              if (!rpcError && rpcData?.success) {
+                usersCreated = rpcData.users_created || 0;
+                methodUsed = "Database RPC Function";
+              } else if (rpcError) {
+                errorDetail = rpcError.message || formatSupabaseError(rpcError);
+              }
+            } catch (rpcEx) {
+              errorDetail = rpcEx.message;
+            }
           }
 
-          showToast(`Processed ${parsedStations.length} stations, created ${usersCreated} Auth accounts!`, "success");
-
-          statusDiv.innerHTML = `
-            <div style="padding:1.25rem; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; color:#065f46; font-size:0.875rem;">
-              <strong style="font-size:1rem;">Region Mapping & Auth Users Pushed to Supabase!</strong>
-              <div style="margin-top:0.5rem; line-height:1.6;">
-                &bull; Stations configured in <code>cci_master</code>: <strong>${parsedStations.length}</strong>
-                <br>&bull; New Accounts in Supabase <code>auth.users</code>: <strong>${usersCreated}</strong>
-                <br>&bull; Default Password: <code>Moto@123</code>
+          if (usersCreated > 0) {
+            showToast(`Success! ${usersCreated} Supabase Auth users created!`, "success");
+            statusDiv.innerHTML = `
+              <div style="padding:1.25rem; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:8px; color:#065f46; font-size:0.875rem;">
+                <strong style="font-size:1rem;">✅ Stations & Supabase Auth Users Created Successfully!</strong>
+                <div style="margin-top:0.5rem; line-height:1.6;">
+                  &bull; Configured in <code>cci_master</code>: <strong>${cciUpsertCount}</strong>
+                  <br>&bull; Created in Supabase <code>auth.users</code>: <strong>${usersCreated}</strong>
+                  <br>&bull; Default Password: <code>Moto@123</code>
+                  <br>&bull; Method: <strong>${methodUsed}</strong>
+                </div>
+                <div style="margin-top:1rem;">
+                  <button type="button" class="btn-primary" id="btn-finish-region-import" style="padding:6px 16px; font-size:0.875rem;">
+                    Done & Refresh CCI List
+                  </button>
+                </div>
               </div>
+            `;
+          } else {
+            // Users could not be created directly via client-side anon key without RPC or service role
+            statusDiv.innerHTML = `
+              <div style="padding:1.25rem; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; color:#92400e; font-size:0.875rem;">
+                <strong style="font-size:1rem; color:#b45309;">⚠️ Stations Saved, but Auth Users Require SQL Editor Run</strong>
+                <div style="margin-top:0.5rem; line-height:1.6;">
+                  &bull; <strong>${cciUpsertCount} stations</strong> were successfully updated in <code>cci_master</code>.
+                  <br>&bull; Direct creation of Auth users from browser was prevented by Supabase: 
+                  <code style="background:#fef3c7; padding:2px 4px; border-radius:4px;">${escapeHtml(errorDetail || "RPC function bulk_create_station_cci_users not installed in Supabase")}</code>
+                </div>
 
-              <div style="margin-top:1rem; padding:0.75rem; background:#ffffff; border:1px solid #a7f3d0; border-radius:6px; font-size:0.8125rem; color:#065f46;">
-                <strong>Supabase SQL Helper:</strong> You can also run <a href="file:///Users/pramod47.kumar/Documents/Happy_Calling/supabase/migrations/20260913000001_bulk_create_station_cci_users.sql" target="_blank" style="text-decoration:underline; font-weight:700;">20260913000001_bulk_create_station_cci_users.sql</a> in your Supabase SQL Editor to enable instant database-level batch user generation.
-              </div>
+                <div style="margin-top:1rem; padding:1rem; background:#ffffff; border:1px solid #fcd34d; border-radius:6px;">
+                  <strong style="color:#1e293b;">👉 Complete Setup in 10 Seconds via Supabase SQL Editor:</strong>
+                  <ol style="margin:0.5rem 0 0.75rem 1.25rem; line-height:1.6; color:#334155; font-size:0.8125rem;">
+                    <li>Click the <strong>"Copy Supabase SQL"</strong> button below.</li>
+                    <li>Go to your <strong>Supabase Dashboard &rarr; SQL Editor</strong>.</li>
+                    <li>Click <strong>New Query</strong>, paste the copied SQL, and click <strong>Run</strong>.</li>
+                    <li>All <strong>${parsedStations.length} users</strong> will instantly appear in Supabase <strong>Authentication &rarr; Users</strong>!</li>
+                  </ol>
+                  <button type="button" id="btn-copy-supabase-sql-fallback" class="btn-primary" style="background:#0284c7; border:none; padding:8px 18px; font-weight:600; font-size:0.875rem;">
+                    📋 Copy Supabase SQL Script Now
+                  </button>
+                </div>
 
-              <div style="margin-top:1rem;">
-                <button type="button" class="btn-primary" id="btn-finish-region-import" style="padding:6px 16px; font-size:0.875rem;">
-                  Done & Refresh CCI List
-                </button>
+                <div style="margin-top:1rem;">
+                  <button type="button" class="btn-secondary" id="btn-finish-region-import" style="padding:6px 16px; font-size:0.875rem;">
+                    Close & View Stations
+                  </button>
+                </div>
               </div>
-            </div>
-          `;
+            `;
+
+            statusDiv.querySelector("#btn-copy-supabase-sql-fallback")?.addEventListener("click", () => {
+              const sql = buildSupabaseBulkSql(parsedStations);
+              navigator.clipboard.writeText(sql).then(() => {
+                showToast(`SQL copied! Paste in Supabase SQL Editor and click RUN.`, "success");
+              });
+            });
+          }
 
           statusDiv.querySelector("#btn-finish-region-import")?.addEventListener("click", () => {
             closeModal();
