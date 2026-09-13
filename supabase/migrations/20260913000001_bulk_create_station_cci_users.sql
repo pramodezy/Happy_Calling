@@ -164,13 +164,24 @@ BEGIN
 
                 v_users_created := v_users_created + 1;
             ELSE
-                -- Update existing auth user password and metadata
+                -- Update existing auth user email to cci_<station_code> format, password and metadata
                 UPDATE auth.users
-                SET encrypted_password = v_encrypted_pw,
+                SET email = v_email,
+                    encrypted_password = v_encrypted_pw,
                     email_confirmed_at = COALESCE(email_confirmed_at, now()),
                     raw_user_meta_data = jsonb_build_object('username', v_username, 'user_name', v_username, 'role', 'CCI_USER', 'cci_code', v_code),
                     updated_at = now()
                 WHERE id = v_auth_id;
+
+                -- Update identity to match new email format
+                BEGIN
+                    UPDATE auth.identities
+                    SET identity_data = jsonb_build_object('sub', v_auth_id::text, 'email', v_email),
+                        provider_id = v_email,
+                        updated_at = now()
+                    WHERE user_id = v_auth_id;
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
 
                 -- Ensure user profile is active and up to date
                 INSERT INTO public.user_profiles (
@@ -353,5 +364,149 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.admin_reset_cci_password(TEXT, TEXT) TO authenticated, anon, service_role;
+
+-- ============================================================================
+-- STEP 1: IMMEDIATE ONE-CLICK MIGRATION FOR EXISTING @motorolacare.in ACCOUNTS
+-- Converts legacy accounts like '1@motorolacare.in' -> 'cci_1@cci.local'
+-- ============================================================================
+DO $$
+DECLARE
+    r RECORD;
+    v_clean_code TEXT;
+    v_uname TEXT;
+    v_new_email TEXT;
+    v_migrated INT := 0;
+BEGIN
+    FOR r IN SELECT id, email FROM auth.users WHERE email LIKE '%@motorolacare.in' AND email NOT LIKE 'admin%'
+    LOOP
+        v_clean_code := split_part(r.email, '@', 1);
+        v_uname := 'cci_' || lower(regexp_replace(v_clean_code, '^cci_?', ''));
+        v_new_email := v_uname || '@cci.local';
+
+        UPDATE auth.users
+        SET email = v_new_email,
+            raw_user_meta_data = jsonb_build_object('username', v_uname, 'user_name', v_uname, 'role', 'CCI_USER', 'cci_code', v_clean_code),
+            updated_at = now()
+        WHERE id = r.id;
+
+        BEGIN
+            UPDATE auth.identities
+            SET identity_data = jsonb_build_object('sub', r.id::text, 'email', v_new_email),
+                provider_id = v_new_email,
+                updated_at = now()
+            WHERE user_id = r.id;
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END;
+
+        UPDATE public.user_profiles
+        SET user_name = v_uname,
+            role = 'CCI_USER',
+            updated_at = now()
+        WHERE auth_user_id = r.id;
+
+        v_migrated := v_migrated + 1;
+        RAISE NOTICE 'Migrated % -> %', r.email, v_new_email;
+    END LOOP;
+
+    IF v_migrated > 0 THEN
+        RAISE NOTICE 'Successfully migrated % legacy accounts to cci_<codeFormat>!', v_migrated;
+    END IF;
+END $$;
+
+-- ============================================================================
+-- STEP 2: AUTO-GENERATE USERS FOR ALL STATIONS CURRENTLY IN cci_master
+-- Creates auth.users (cci_<station_code>@cci.local) with password Moto@123
+-- ============================================================================
+DO $$
+DECLARE
+    r RECORD;
+    v_username TEXT;
+    v_email TEXT;
+    v_auth_id UUID;
+    v_pw TEXT := crypt('Moto@123', gen_salt('bf', 10));
+    v_created INT := 0;
+    v_updated INT := 0;
+BEGIN
+    FOR r IN SELECT cci_code, cci_name, region, location FROM public.cci_master
+    LOOP
+        v_username := 'cci_' || lower(regexp_replace(r.cci_code, '^cci_?', ''));
+        v_email := v_username || '@cci.local';
+
+        -- Check if user exists
+        SELECT id INTO v_auth_id FROM auth.users 
+        WHERE email = v_email 
+           OR email = lower(r.cci_code) || '@motorolacare.in' 
+           OR email = v_username || '@motorolacare.in'
+        LIMIT 1;
+
+        IF v_auth_id IS NULL THEN
+            v_auth_id := gen_random_uuid();
+
+            INSERT INTO auth.users (
+                id, instance_id, email, encrypted_password, email_confirmed_at,
+                raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+                role, aud, confirmation_token, is_super_admin
+            ) VALUES (
+                v_auth_id,
+                '00000000-0000-0000-0000-000000000000'::uuid,
+                v_email,
+                v_pw,
+                now(),
+                '{"provider":"email","providers":["email"]}'::jsonb,
+                jsonb_build_object('username', v_username, 'user_name', v_username, 'role', 'CCI_USER', 'cci_code', r.cci_code),
+                now(), now(), 'authenticated', 'authenticated', encode(gen_random_bytes(32), 'hex'), false
+            );
+
+            BEGIN
+                INSERT INTO auth.identities (
+                    id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at
+                ) VALUES (
+                    v_auth_id, v_auth_id,
+                    jsonb_build_object('sub', v_auth_id::text, 'email', v_email),
+                    'email', v_email, now(), now(), now()
+                );
+            EXCEPTION WHEN OTHERS THEN NULL;
+            END;
+
+            INSERT INTO public.user_profiles (
+                auth_user_id, user_name, role, cci_code, cci_name, status
+            ) VALUES (
+                v_auth_id, v_username, 'CCI_USER', r.cci_code, r.cci_name, 'ACTIVE'
+            ) ON CONFLICT (auth_user_id) DO UPDATE
+            SET user_name = v_username, cci_code = r.cci_code, cci_name = r.cci_name, role = 'CCI_USER', status = 'ACTIVE', updated_at = now();
+
+            v_created := v_created + 1;
+        ELSE
+            UPDATE auth.users
+            SET email = v_email,
+                encrypted_password = v_pw,
+                email_confirmed_at = COALESCE(email_confirmed_at, now()),
+                raw_user_meta_data = jsonb_build_object('username', v_username, 'user_name', v_username, 'role', 'CCI_USER', 'cci_code', r.cci_code),
+                updated_at = now()
+            WHERE id = v_auth_id;
+
+            BEGIN
+                UPDATE auth.identities
+                SET identity_data = jsonb_build_object('sub', v_auth_id::text, 'email', v_email),
+                    provider_id = v_email,
+                    updated_at = now()
+                WHERE user_id = v_auth_id;
+            EXCEPTION WHEN OTHERS THEN NULL;
+            END;
+
+            INSERT INTO public.user_profiles (
+                auth_user_id, user_name, role, cci_code, cci_name, status
+            ) VALUES (
+                v_auth_id, v_username, 'CCI_USER', r.cci_code, r.cci_name, 'ACTIVE'
+            ) ON CONFLICT (auth_user_id) DO UPDATE
+            SET user_name = v_username, cci_code = r.cci_code, cci_name = r.cci_name, role = 'CCI_USER', status = 'ACTIVE', updated_at = now();
+
+            v_updated := v_updated + 1;
+        END IF;
+    END LOOP;
+
+    RAISE NOTICE 'SUCCESS: % new station users created, % existing users updated to cci_<codeFormat> with password Moto@123!', v_created, v_updated;
+END $$;
+
 
 

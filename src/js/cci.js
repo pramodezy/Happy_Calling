@@ -575,13 +575,24 @@ BEGIN
 
                 v_inserted_users := v_inserted_users + 1;
             ELSE
-                -- Update password and metadata
+                -- Update email to cci_<station_code> format, password and metadata
                 UPDATE auth.users
-                SET encrypted_password = v_encrypted_pw,
+                SET email = v_email,
+                    encrypted_password = v_encrypted_pw,
                     email_confirmed_at = COALESCE(email_confirmed_at, now()),
                     raw_user_meta_data = jsonb_build_object('username', v_username, 'user_name', v_username, 'role', 'CCI_USER', 'cci_code', v_code),
                     updated_at = now()
                 WHERE id = v_auth_id;
+
+                -- Update identity to match new email format
+                BEGIN
+                    UPDATE auth.identities
+                    SET identity_data = jsonb_build_object('sub', v_auth_id::text, 'email', v_email),
+                        provider_id = v_email,
+                        updated_at = now()
+                    WHERE user_id = v_auth_id;
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
 
                 INSERT INTO public.user_profiles (
                     auth_user_id, user_name, role, cci_code, cci_name, status
