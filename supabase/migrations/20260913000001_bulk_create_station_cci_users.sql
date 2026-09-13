@@ -396,7 +396,7 @@ BEGIN
         phone_change = COALESCE(phone_change, ''),
         phone_change_token = COALESCE(phone_change_token, ''),
         reauthentication_token = COALESCE(reauthentication_token, ''),
-        confirmed_at = COALESCE(confirmed_at, email_confirmed_at, now());
+        email_confirmed_at = COALESCE(email_confirmed_at, now());
 
     -- ------------------------------------------------------------------------
     -- STEP 2: DELETE ALL NON-ADMIN ACCOUNTS (Preserves your Admin account)
@@ -460,7 +460,6 @@ BEGIN
             email,
             encrypted_password,
             email_confirmed_at,
-            confirmed_at,
             raw_app_meta_data,
             raw_user_meta_data,
             created_at,
@@ -482,7 +481,6 @@ BEGIN
             '00000000-0000-0000-0000-000000000000'::uuid,
             v_email,
             v_pw,
-            now(),
             now(),
             '{"provider":"email","providers":["email"]}'::jsonb,
             jsonb_build_object(

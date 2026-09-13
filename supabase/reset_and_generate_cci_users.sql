@@ -1,13 +1,6 @@
 -- ============================================================================
 -- MOTOROLA HAPPY CALLING: CLEAN RESET & FIX "Database error querying schema"
 -- Paste and Run in: Supabase Dashboard -> SQL Editor -> New Query -> Run
---
--- FIX EXPLANATION:
--- Supabase Auth (GoTrue) throws "500: Database error querying schema" when scanning
--- auth.users rows that have NULL in token columns (confirmation_token, recovery_token,
--- email_change_token_new, email_change_token_current, email_change, etc.).
--- Go's sql.Scan cannot convert NULL to string for these fields.
--- Setting these columns to empty string '' permanently resolves this error!
 -- ============================================================================
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -24,7 +17,8 @@ DECLARE
     v_created INT := 0;
 BEGIN
     -- ------------------------------------------------------------------------
-    -- STEP 1: FIX ANY EXISTING ADMIN USER TO PREVENT SCAN ERRORS
+    -- STEP 1: REPAIR ANY EXISTING USERS (Sets token columns to '' instead of NULL)
+    -- Note: 'confirmed_at' is a generated column, so we only update email_confirmed_at
     -- ------------------------------------------------------------------------
     UPDATE auth.users
     SET confirmation_token = COALESCE(confirmation_token, ''),
@@ -35,7 +29,7 @@ BEGIN
         phone_change = COALESCE(phone_change, ''),
         phone_change_token = COALESCE(phone_change_token, ''),
         reauthentication_token = COALESCE(reauthentication_token, ''),
-        confirmed_at = COALESCE(confirmed_at, email_confirmed_at, now());
+        email_confirmed_at = COALESCE(email_confirmed_at, now());
 
     -- ------------------------------------------------------------------------
     -- STEP 2: DELETE ALL NON-ADMIN ACCOUNTS (Preserves your Admin account)
@@ -92,14 +86,13 @@ BEGIN
         v_email := v_username || '@happycalling.in';
         v_auth_id := gen_random_uuid();
 
-        -- 4.1 Insert into auth.users (All token string fields explicitly set to '')
+        -- 4.1 Insert into auth.users (All string token columns explicitly '')
         INSERT INTO auth.users (
             id,
             instance_id,
             email,
             encrypted_password,
             email_confirmed_at,
-            confirmed_at,
             raw_app_meta_data,
             raw_user_meta_data,
             created_at,
@@ -121,7 +114,6 @@ BEGIN
             '00000000-0000-0000-0000-000000000000'::uuid,
             v_email,
             v_pw,
-            now(),
             now(),
             '{"provider":"email","providers":["email"]}'::jsonb,
             jsonb_build_object(
@@ -202,6 +194,6 @@ BEGIN
     END LOOP;
 
     RAISE NOTICE '=======================================================';
-    RAISE NOTICE 'SUCCESS: % old non-admin accounts removed. % clean station accounts generated from cci_master with default password Moto@123!', v_deleted, v_created;
+    RAISE NOTICE 'SUCCESS: % old non-admin accounts removed. % clean station accounts generated with default password Moto@123!', v_deleted, v_created;
     RAISE NOTICE '=======================================================';
 END $$;
