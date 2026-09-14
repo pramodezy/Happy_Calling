@@ -134,13 +134,14 @@ BEGIN
     END IF;
 
     -- Log to audit log
-    INSERT INTO public.audit_logs (
-        action_type, entity_name, entity_id, user_id, new_data
+    INSERT INTO public.audit_log (
+        user_id, role, cci_code, action, description, metadata
     ) VALUES (
-        'INTIMATION_CALL_LOGGED',
-        'intimation_calling',
-        v_new_id::text,
         auth.uid(),
+        v_role,
+        p_cci_code,
+        'INTIMATION_CALL_LOGGED',
+        'Customer ETR committed: ' || p_etr_date || ' (ETA #' || v_new_eta_number || ') for SO ' || p_service_order,
         jsonb_build_object(
             'service_order', p_service_order,
             'cci_code', p_cci_code,

@@ -682,7 +682,7 @@ function renderEtrWindow(mount, call) {
           customer_comment: customerComment,
           eta_number: currentEtaNum,
           revision_reason: revisionReason,
-          calling_user_id: profile?.id || null,
+          calling_user_id: profile?.auth_user_id || (await supabase.auth.getUser())?.data?.user?.id || null,
         });
         if (insertErr) throw insertErr;
 
