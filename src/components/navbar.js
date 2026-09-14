@@ -4,11 +4,13 @@
 
 import { icons, escapeHtml } from "../js/utils.js";
 import { getCurrentProfile, logoutUser } from "../js/auth.js";
+import { getActiveWorkspace, setActiveWorkspace } from "../js/workspace.js";
 
 export function renderNavbar() {
   const profile = getCurrentProfile() || {};
   const initials = profile.user_name ? profile.user_name.substring(0, 2).toUpperCase() : "MO";
   const roleLabel = profile.role === "ADMIN" ? "Company Administrator" : `${profile.cci_code || "CCI"} Partner`;
+  const activeWorkspace = getActiveWorkspace();
 
   return `
     <header class="topbar">
@@ -17,9 +19,22 @@ export function renderNavbar() {
           <span style="display:block; width:22px; height:22px;">${icons.menu}</span>
         </button>
         <div class="topbar-brand-title">
-          <span>Motorola Happy Calling</span>
-          <span class="topbar-subtitle">CCI Service Portal</span>
+          <span>Motorola Care</span>
+          <span class="topbar-subtitle">Operations Portal</span>
         </div>
+      </div>
+
+      <!-- Top Tab Workspace Switcher -->
+      <div class="topbar-workspace-switcher" role="tablist" aria-label="Application Workspace">
+        <button type="button" id="ws-tab-happy" class="ws-tab-btn ${activeWorkspace === 'happy' ? 'active' : ''}" role="tab" aria-selected="${activeWorkspace === 'happy'}">
+          <span class="ws-tab-icon">${icons.phone}</span>
+          <span class="ws-tab-label">Happy Calling</span>
+        </button>
+        <button type="button" id="ws-tab-intimation" class="ws-tab-btn ${activeWorkspace === 'intimation' ? 'active' : ''}" role="tab" aria-selected="${activeWorkspace === 'intimation'}">
+          <span class="ws-tab-icon">${icons.clock}</span>
+          <span class="ws-tab-label">Intimation Calling</span>
+          <span class="ws-tab-badge">&gt;3d ETR</span>
+        </button>
       </div>
 
       <div class="topbar-right">
@@ -55,6 +70,21 @@ export function initNavbarEvents() {
     });
   }
 
+  const tabHappy = document.getElementById("ws-tab-happy");
+  const tabIntimation = document.getElementById("ws-tab-intimation");
+
+  if (tabHappy) {
+    tabHappy.addEventListener("click", () => {
+      setActiveWorkspace("happy");
+    });
+  }
+
+  if (tabIntimation) {
+    tabIntimation.addEventListener("click", () => {
+      setActiveWorkspace("intimation");
+    });
+  }
+
   const logoutBtn = document.getElementById("btn-topbar-logout");
   if (logoutBtn) {
     logoutBtn.addEventListener("click", async () => {
@@ -63,3 +93,4 @@ export function initNavbarEvents() {
     });
   }
 }
+

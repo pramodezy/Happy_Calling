@@ -4,12 +4,15 @@
 
 import { icons, escapeHtml } from "../js/utils.js";
 import { getCurrentProfile, isAdmin, logoutUser } from "../js/auth.js";
+import { getActiveWorkspace } from "../js/workspace.js";
 
 export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0) {
   const admin = isAdmin();
   const profile = getCurrentProfile() || {};
+  const workspace = getActiveWorkspace();
 
-  const cciNavItems = [
+  // Happy Calling workspace navigation
+  const happyCciNav = [
     { path: "#/dashboard", label: "Dashboard", icon: icons.dashboard },
     { path: "#/happy-calling", label: "Start Happy Calling", icon: icons.phone, badge: "Action" },
     { path: "#/pending", label: "Pending Calls", icon: icons.clock, count: pendingBadgeCount },
@@ -18,7 +21,7 @@ export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0
     { path: "#/profile", label: "My Profile", icon: icons.user },
   ];
 
-  const adminNavItems = [
+  const happyAdminNav = [
     { section: "Analytics & Monitoring" },
     { path: "#/admin", label: "Admin Dashboard", icon: icons.dashboard },
     { path: "#/admin/performance", label: "CCI Performance", icon: icons.award },
@@ -35,7 +38,38 @@ export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0
     { path: "#/profile", label: "My Profile", icon: icons.user },
   ];
 
-  const items = admin ? adminNavItems : cciNavItems;
+  // Intimation Calling workspace navigation
+  const intimationCciNav = [
+    { path: "#/intimation/dashboard", label: "Intimation Overview", icon: icons.dashboard },
+    { path: "#/intimation/calling", label: "ETR Calling Window", icon: icons.phone, badge: ">3d ETR" },
+    { path: "#/intimation/pending", label: "Open Calls Backlog", icon: icons.clock },
+    { path: "#/intimation/history", label: "Intimation History", icon: icons.checkCircle },
+    { path: "#/performance", label: "My Performance", icon: icons.award },
+    { path: "#/profile", label: "My Profile", icon: icons.user },
+  ];
+
+  const intimationAdminNav = [
+    { section: "Intimation Analytics" },
+    { path: "#/intimation/admin", label: "Intimation Admin", icon: icons.dashboard },
+    { path: "#/intimation/dashboard", label: "Intimation Overview", icon: icons.award },
+    { path: "#/intimation/pending", label: "Open Calls Backlog", icon: icons.clock },
+    { path: "#/intimation/history", label: "Intimation History", icon: icons.fileText },
+    { section: "Operations" },
+    { path: "#/intimation/import", label: "Upload Open Calls", icon: icons.upload },
+    { path: "#/intimation/calling", label: "ETR Calling Window", icon: icons.phone },
+    { section: "Administration" },
+    { path: "#/admin/users", label: "User Management", icon: icons.users },
+    { path: "#/admin/cci", label: "CCI Management", icon: icons.mapPin },
+    { path: "#/admin/audit", label: "Audit Log", icon: icons.fileText },
+    { path: "#/profile", label: "My Profile", icon: icons.user },
+  ];
+
+  let items;
+  if (workspace === "intimation") {
+    items = admin ? intimationAdminNav : intimationCciNav;
+  } else {
+    items = admin ? happyAdminNav : happyCciNav;
+  }
 
   let menuHtml = "";
   items.forEach((item) => {
@@ -62,17 +96,29 @@ export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0
     `;
   });
 
+  const logoHref = workspace === "intimation"
+    ? (admin ? "#/intimation/admin" : "#/intimation/dashboard")
+    : (admin ? "#/admin" : "#/dashboard");
+
   return `
     <div class="sidebar-backdrop"></div>
     <aside class="sidebar">
       <div class="sidebar-header">
-        <a href="${admin ? "#/admin" : "#/dashboard"}" class="sidebar-logo">
+        <a href="${logoHref}" class="sidebar-logo">
           <div class="logo-icon-wrap">M</div>
           <div class="logo-text-wrap">
             <span class="logo-title">Motorola Care</span>
             <span class="logo-sub">${admin ? "Enterprise Admin" : escapeHtml(profile.cci_code || "CCI Portal")}</span>
           </div>
         </a>
+      </div>
+
+      <!-- Workspace Context Indicator -->
+      <div style="padding:0.75rem 1.25rem 0.25rem;">
+        <div style="font-size:0.68rem; font-weight:800; text-transform:uppercase; letter-spacing:0.8px; color:var(--text-tertiary); display:flex; align-items:center; gap:6px;">
+          <span style="width:6px; height:6px; border-radius:50%; background:${workspace === 'intimation' ? '#ef4444' : 'var(--moto-blue-accent)'};"></span>
+          <span>${workspace === 'intimation' ? 'Intimation Workspace' : 'Happy Calling Workspace'}</span>
+        </div>
       </div>
 
       <div class="sidebar-content">
@@ -93,6 +139,37 @@ export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0
 
 export function renderMobileBottomNav(currentPath = "#/dashboard", pendingCount = 0) {
   const admin = isAdmin();
+  const workspace = getActiveWorkspace();
+
+  if (workspace === "intimation") {
+    const homePath = admin ? "#/intimation/admin" : "#/intimation/dashboard";
+    return `
+      <nav class="mobile-bottom-nav">
+        <a href="${homePath}" class="mobile-nav-item ${currentPath === homePath ? "active" : ""}">
+          ${icons.dashboard}
+          <span>Overview</span>
+        </a>
+        <a href="#/intimation/pending" class="mobile-nav-item ${currentPath === "#/intimation/pending" ? "active" : ""}">
+          ${icons.clock}
+          <span>Backlog</span>
+        </a>
+        <a href="#/intimation/calling" class="mobile-nav-item ${currentPath === "#/intimation/calling" ? "active" : ""}" style="color:#ef4444; font-weight:700;">
+          <div style="background:#ef4444; color:#fff; border-radius:50%; width:32px; height:32px; display:flex; align-items:center; justify-content:center; margin-top:-14px; box-shadow:0 3px 8px rgba(239,68,68,0.4);">
+            <span style="width:16px; height:16px;">${icons.phone}</span>
+          </div>
+          <span>ETR Call</span>
+        </a>
+        <a href="#/intimation/history" class="mobile-nav-item ${currentPath === "#/intimation/history" ? "active" : ""}">
+          ${icons.checkCircle}
+          <span>History</span>
+        </a>
+        <a href="#/profile" class="mobile-nav-item ${currentPath === "#/profile" ? "active" : ""}">
+          ${icons.user}
+          <span>Profile</span>
+        </a>
+      </nav>
+    `;
+  }
 
   if (admin) {
     return `

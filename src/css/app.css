@@ -217,6 +217,90 @@ input, select, textarea {
   color: var(--text-secondary);
 }
 
+/* ============================================================================
+   TOPBAR WORKSPACE SWITCHER (Happy Calling vs Intimation Calling)
+   ============================================================================ */
+.topbar-workspace-switcher {
+  display: flex;
+  align-items: center;
+  background: var(--bg-surface-secondary);
+  padding: 4px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  gap: 4px;
+}
+
+.ws-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  background: transparent;
+  transition: all var(--transition-fast);
+  user-select: none;
+  cursor: pointer;
+}
+
+.ws-tab-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.ws-tab-btn.active {
+  background: #ffffff;
+  color: var(--moto-blue-primary);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.06);
+  font-weight: 700;
+}
+
+.ws-tab-btn.active#ws-tab-intimation {
+  color: #dc2626;
+}
+
+.ws-tab-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.ws-tab-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ws-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  border-radius: 10px;
+  background: #fee2e2;
+  color: #b91c1c;
+  line-height: 1.2;
+}
+
+@media (max-width: 768px) {
+  .topbar-workspace-switcher {
+    margin: 0;
+  }
+  .ws-tab-label {
+    display: none;
+  }
+  .ws-tab-btn {
+    padding: 6px 10px;
+  }
+}
+
 /* Sidebar Navigation */
 .sidebar {
   width: var(--sidebar-width);

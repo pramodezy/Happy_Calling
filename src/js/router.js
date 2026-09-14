@@ -20,6 +20,13 @@ import { renderCciPage } from "./cci.js";
 import { renderClosuresPage } from "./closures.js";
 import { renderImportPage } from "./import.js";
 import { renderAuditPage } from "./audit.js";
+import { renderIntimationCallingPage } from "./intimation-calling.js";
+import { renderIntimationPendingPage } from "./intimation-pending.js";
+import { renderIntimationHistoryPage } from "./intimation-history.js";
+import { renderIntimationImportPage } from "./intimation-import.js";
+import { renderIntimationDashboardPage } from "./intimation-dashboard.js";
+import { renderAdminIntimationPage } from "./admin-intimation.js";
+import { getActiveWorkspace } from "./workspace.js";
 import { escapeHtml, formatDateTime, icons } from "./utils.js";
 import { showToast } from "../components/toast.js";
 
@@ -46,6 +53,14 @@ const routes = {
   "#/admin/users": { render: renderUsersPage, requiresAuth: true, adminOnly: true },
   "#/admin/cci": { render: renderCciPage, requiresAuth: true, adminOnly: true },
   "#/admin/audit": { render: renderAuditPage, requiresAuth: true, adminOnly: true },
+
+  // Intimation Calling Routes
+  "#/intimation/dashboard": { render: renderIntimationDashboardPage, requiresAuth: true },
+  "#/intimation/calling": { render: renderIntimationCallingPage, requiresAuth: true },
+  "#/intimation/pending": { render: renderIntimationPendingPage, requiresAuth: true },
+  "#/intimation/history": { render: renderIntimationHistoryPage, requiresAuth: true },
+  "#/intimation/import": { render: renderIntimationImportPage, requiresAuth: true, adminOnly: true },
+  "#/intimation/admin": { render: renderAdminIntimationPage, requiresAuth: true, adminOnly: true },
 };
 
 /**
@@ -68,12 +83,18 @@ export async function handleRouteChange() {
   let hash = window.location.hash || "";
   if (!hash || hash === "#" || hash === "#/") {
     const profile = getCurrentProfile();
-    hash = profile ? (profile.role === "ADMIN" ? "#/admin" : "#/dashboard") : "#/login";
+    const ws = getActiveWorkspace();
+    if (ws === "intimation") {
+      hash = profile ? (profile.role === "ADMIN" ? "#/intimation/admin" : "#/intimation/dashboard") : "#/login";
+    } else {
+      hash = profile ? (profile.role === "ADMIN" ? "#/admin" : "#/dashboard") : "#/login";
+    }
     window.location.hash = hash;
     return;
   }
 
-  const route = routes[hash] || routes["#/dashboard"];
+  const routePath = hash.split("?")[0];
+  const route = routes[routePath] || routes["#/dashboard"];
   const appRoot = document.getElementById("app");
   if (!appRoot) return;
 
@@ -99,19 +120,19 @@ export async function handleRouteChange() {
   }
 
   // Render Login layout or Authenticated Enterprise Shell layout
-  if (hash === "#/login") {
+  if (routePath === "#/login") {
     appRoot.innerHTML = `<div id="login-viewport" style="min-height:100vh; width:100%;"></div>`;
     const loginMount = document.getElementById("login-viewport");
     renderLoginPage(loginMount);
   } else {
     // Authenticated Shell with Sidebar, Topbar, Mobile Nav, and Content Viewport
     appRoot.innerHTML = `
-      ${renderSidebar(hash)}
+      ${renderSidebar(routePath)}
       <div class="layout-main">
         ${renderNavbar()}
         <main class="content-viewport" id="content-mount"></main>
       </div>
-      ${renderMobileBottomNav(hash)}
+      ${renderMobileBottomNav(routePath)}
     `;
 
     initSidebarEvents();
