@@ -2,9 +2,19 @@
 // Motorola Happy Calling - Application Entry Point
 // ============================================================================
 
-import { initializeAuth } from "./auth.js";
+import { initializeAuth, onAuthStateChanged } from "./auth.js";
 import { initRouter } from "./router.js";
+import { startInactivityTracker, stopInactivityTracker } from "./session-timeout.js";
 import { showToast } from "../components/toast.js";
+
+// Automatic Session Timeout: 5 minutes of inactivity for any logged-in user
+onAuthStateChanged((profile) => {
+  if (profile) {
+    startInactivityTracker();
+  } else {
+    stopInactivityTracker();
+  }
+});
 
 // Restore stored credentials if entered in browser setup fallback
 if (!window.__SUPABASE_URL__ && localStorage.getItem("__MOTO_SU_URL__")) {

@@ -164,17 +164,20 @@ export async function loginWithEmail(identifier, password) {
 /**
  * Logout current user and clear session
  */
-export async function logoutUser() {
+export async function logoutUser(reason = "USER_ACTION") {
   if (!supabase) return;
 
   try {
     if (currentAuthUser && currentUserProfile) {
+      const isAuto = reason === "INACTIVITY";
       await supabase.from("audit_log").insert({
         user_id: currentAuthUser.id,
         role: currentUserProfile.role,
         cci_code: currentUserProfile.cci_code,
-        action: "LOGOUT",
-        description: `User ${currentUserProfile.user_name} logged out.`,
+        action: isAuto ? "AUTO_LOGOUT" : "LOGOUT",
+        description: isAuto
+          ? `User ${currentUserProfile.user_name} automatically logged out due to 5 minutes of inactivity.`
+          : `User ${currentUserProfile.user_name} logged out.`,
       });
     }
   } catch (e) {
