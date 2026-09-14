@@ -1,14 +1,12 @@
-// ============================================================================
-// Start Happy Calling Workflow Controller
-// ============================================================================
-
 import { supabase, formatSupabaseError } from "./supabase.js";
+import { getCurrentProfile, isAdmin } from "./auth.js";
 import { formatMobile, formatDate, formatDateTime, calculateAgeingDays, renderAgeingBadge, escapeHtml, icons } from "./utils.js";
 import { showToast } from "../components/toast.js";
 import { renderSpinner } from "../components/loading.js";
 
 let currentClosure = null;
 let isSubmitting = false;
+const skippedClosureIds = new Set();
 
 export async function renderHappyCallingPage(container) {
   container.innerHTML = `
@@ -16,7 +14,7 @@ export async function renderHappyCallingPage(container) {
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem;">
         <div>
           <h2 style="font-size:1.375rem; font-weight:700; color:var(--text-primary);">Happy Calling Queue</h2>
-          <p style="font-size:0.875rem; color:var(--text-secondary);">Oldest pending service repair closure automatically retrieved.</p>
+          <p style="font-size:0.875rem; color:var(--text-secondary);">Pending customer service closures automatically retrieved in priority sequence.</p>
         </div>
         <button type="button" id="btn-refresh-pending" class="btn-secondary" style="display:flex; align-items:center; gap:0.35rem; font-size:0.8125rem;">
           <span style="display:block; width:16px; height:16px;">${icons.refreshCw}</span>
@@ -31,27 +29,113 @@ export async function renderHappyCallingPage(container) {
   `;
 
   document.getElementById("btn-refresh-pending")?.addEventListener("click", () => {
-    loadNextClosure();
+    if (window.location.hash.includes("?so=")) {
+      window.location.hash = "#/happy-calling";
+    } else {
+      loadNextClosure();
+    }
   });
 
-  await loadNextClosure();
+  let initialSo = null;
+  const hash = window.location.hash || "";
+  if (hash.includes("?so=")) {
+    initialSo = decodeURIComponent(hash.split("?so=")[1].split("&")[0]);
+  }
+
+  await loadNextClosure(initialSo);
 }
 
 /**
- * Fetch next oldest pending closure using secure database RPC function get_next_pending_closure()
+ * Fetch next pending closure while respecting skipped items and CCIs
  */
-async function loadNextClosure() {
+async function loadNextClosure(specificSoNumber = null) {
   const mount = document.getElementById("calling-queue-mount");
   if (!mount) return;
 
   mount.innerHTML = renderSpinner("Fetching next pending repair closure...");
 
+  const profile = getCurrentProfile();
+
   try {
-    const { data, error } = await supabase.rpc("get_next_pending_closure");
+    let targetClosure = null;
 
-    if (error) throw error;
+    if (specificSoNumber) {
+      let q = supabase.from("closure_master").select("*").eq("so_number", specificSoNumber);
+      if (!isAdmin() && profile?.cci_code) {
+        q = q.eq("cci_code", profile.cci_code);
+      }
+      const { data } = await q.maybeSingle();
+      targetClosure = data;
+    } else {
+      // Query candidate pending closures
+      let q = supabase
+        .from("closure_master")
+        .select(`
+          id,
+          closure_id,
+          so_number,
+          cci_code,
+          cci_name,
+          customer_name,
+          customer_mobile,
+          model,
+          closure_date,
+          repair_complete_date,
+          repair_creation_date,
+          source_data,
+          warranty_status,
+          repair_type
+        `)
+        .order("closure_date", { ascending: true })
+        .order("created_at", { ascending: true })
+        .limit(60);
 
-    if (!data || !data.found || !data.closure) {
+      if (!isAdmin() && profile?.cci_code) {
+        q = q.eq("cci_code", profile.cci_code);
+      }
+
+      const { data: batch, error } = await q;
+      if (error) throw error;
+
+      if (batch && batch.length > 0) {
+        // Exclude completed calls
+        const cIds = batch.map((c) => c.closure_id);
+        const { data: completed } = await supabase
+          .from("happy_calling")
+          .select("closure_id")
+          .in("closure_id", cIds)
+          .eq("calling_status", "Completed");
+
+        const completedSet = new Set((completed || []).map((c) => c.closure_id));
+        const pendingBatch = batch.filter((c) => !completedSet.has(c.closure_id));
+
+        if (pendingBatch.length > 0) {
+          // Find first call that user has NOT skipped in this session
+          targetClosure = pendingBatch.find((c) => !skippedClosureIds.has(c.closure_id) && !skippedClosureIds.has(c.id));
+
+          // If all available pending calls have been skipped, wrap around
+          if (!targetClosure && skippedClosureIds.size > 0) {
+            skippedClosureIds.clear();
+            targetClosure = pendingBatch[0];
+            showToast("Reached end of pending queue. Returning to first skipped call.", "info");
+          }
+        }
+      }
+
+      // Fallback to RPC if direct query yielded nothing and no skip active
+      if (!targetClosure && skippedClosureIds.size === 0) {
+        try {
+          const { data: rpcData } = await supabase.rpc("get_next_pending_closure");
+          if (rpcData?.found && rpcData.closure) {
+            targetClosure = rpcData.closure;
+          }
+        } catch (e) {
+          console.warn("RPC get_next_pending_closure fallback:", e);
+        }
+      }
+    }
+
+    if (!targetClosure) {
       currentClosure = null;
       mount.innerHTML = `
         <div class="empty-state" style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--radius-lg);">
@@ -67,7 +151,7 @@ async function loadNextClosure() {
       return;
     }
 
-    currentClosure = data.closure;
+    currentClosure = targetClosure;
 
     // Load full closure fields (source_data, warranty_status, repair_type)
     try {
@@ -112,7 +196,7 @@ async function loadNextClosure() {
         </div>
       </div>
     `;
-    document.getElementById("btn-retry-closure")?.addEventListener("click", loadNextClosure);
+    document.getElementById("btn-retry-closure")?.addEventListener("click", () => loadNextClosure(specificSoNumber));
   }
 }
 
@@ -461,7 +545,15 @@ function attachFormEvents() {
 
   // Skip button
   document.getElementById("btn-skip-call")?.addEventListener("click", () => {
-    loadNextClosure();
+    if (currentClosure) {
+      skippedClosureIds.add(currentClosure.closure_id);
+      if (currentClosure.id) skippedClosureIds.add(currentClosure.id);
+    }
+    if (window.location.hash.includes("?so=")) {
+      window.location.hash = "#/happy-calling";
+    } else {
+      loadNextClosure();
+    }
   });
 
   // Form Submit
@@ -513,6 +605,11 @@ function attachFormEvents() {
       });
 
       if (error) throw error;
+
+      if (currentClosure) {
+        skippedClosureIds.delete(currentClosure.closure_id);
+        if (currentClosure.id) skippedClosureIds.delete(currentClosure.id);
+      }
 
       showToast(`Happy Calling submitted successfully for SO ${soNumber}!`, "success");
 

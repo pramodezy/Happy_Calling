@@ -11,6 +11,7 @@ import { renderSpinner } from "../components/loading.js";
 
 let currentCall = null;
 let isSubmitting = false;
+const skippedServiceOrders = new Set();
 
 export async function renderIntimationCallingPage(container) {
   container.innerHTML = `
@@ -31,7 +32,7 @@ export async function renderIntimationCallingPage(container) {
           </a>
           <button type="button" id="btn-refresh-intimation" class="btn-secondary" style="display:flex; align-items:center; gap:0.35rem; font-size:0.8125rem;">
             <span style="display:block; width:16px; height:16px;">${icons.refreshCw}</span>
-            <span>Next Call</span>
+            <span>Refresh</span>
           </button>
         </div>
       </div>
@@ -87,71 +88,93 @@ export async function loadNextIntimationCall(specificSoNumber = null) {
       if (error) throw error;
       callRecord = data;
     } else {
-      // 1. Try secure RPC get_next_intimation_call
-      try {
-        const { data, error } = await supabase.rpc("get_next_intimation_call");
-        if (!error && data?.found && data.call) {
-          callRecord = data.call;
-          isReintimation = !!data.is_reintimation;
-          etaDue = data.eta_due || 1;
-        }
-      } catch (rpcErr) {
-        console.warn("RPC get_next_intimation_call fallback:", rpcErr);
+      const todayStr = new Date().toISOString().split("T")[0];
+      const tomorrowStr = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+      const threeDaysAgoIso = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
+      let candidateBatch = [];
+
+      // 1. Check for expiring/overdue ETRs first (Re-intimation priority)
+      let qExpiring = supabase
+        .from("open_calls_master")
+        .select("*")
+        .eq("is_open", true)
+        .is("finish_repair_time", null)
+        .not("current_etr_date", "is", null)
+        .lte("current_etr_date", tomorrowStr)
+        .lt("eta_count", 3);
+
+      if (!isAdmin()) {
+        qExpiring = qExpiring.eq("cci_code", profile.cci_code);
       }
 
-      // 2. Direct Supabase Query Fallback
-      if (!callRecord) {
-        const todayStr = new Date().toISOString().split("T")[0];
-        const tomorrowStr = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
-        const threeDaysAgoIso = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: expiringBatch } = await qExpiring.order("current_etr_date", { ascending: true }).limit(30);
+      if (expiringBatch && expiringBatch.length > 0) {
+        expiringBatch.forEach((c) => {
+          c._isReintimation = true;
+          c._etaDue = (c.eta_count || 1) + 1;
+        });
+        candidateBatch.push(...expiringBatch);
+      }
 
-        // Check for expiring/overdue ETRs first (Re-intimation priority)
-        let qExpiring = supabase
-          .from("open_calls_master")
-          .select("*")
-          .eq("is_open", true)
-          .is("finish_repair_time", null)
-          .not("current_etr_date", "is", null)
-          .lte("current_etr_date", tomorrowStr)
-          .lt("eta_count", 3);
+      // 2. Fresh open calls with Ageing > 3 days
+      let q = supabase
+        .from("open_calls_master")
+        .select("*")
+        .eq("is_open", true)
+        .lte("carry_in_time", threeDaysAgoIso);
 
-        if (!isAdmin()) {
-          qExpiring = qExpiring.eq("cci_code", profile.cci_code);
+      if (!isAdmin()) {
+        q = q.eq("cci_code", profile.cci_code);
+      }
+
+      const { data: openBatch } = await q.order("carry_in_time", { ascending: true }).limit(50);
+
+      if (openBatch && openBatch.length > 0) {
+        const soList = openBatch.map((c) => c.service_order);
+        const { data: completedIntimations } = await supabase
+          .from("intimation_calling")
+          .select("service_order")
+          .in("service_order", soList)
+          .eq("calling_status", "Completed");
+
+        const completedSoSet = new Set((completedIntimations || []).map((i) => i.service_order));
+        const pendingFresh = openBatch.filter((c) => !completedSoSet.has(c.service_order));
+        pendingFresh.forEach((c) => {
+          c._isReintimation = false;
+          c._etaDue = 1;
+        });
+        candidateBatch.push(...pendingFresh);
+      }
+
+      if (candidateBatch.length > 0) {
+        // Pick first candidate not yet skipped in this session
+        callRecord = candidateBatch.find((c) => !skippedServiceOrders.has(c.service_order));
+
+        // If all available calls were skipped, wrap around
+        if (!callRecord && skippedServiceOrders.size > 0) {
+          skippedServiceOrders.clear();
+          callRecord = candidateBatch[0];
+          showToast("Reached end of pending queue. Returning to first skipped call.", "info");
         }
 
-        const { data: expiringBatch } = await qExpiring.order("current_etr_date", { ascending: true }).limit(1);
+        if (callRecord) {
+          isReintimation = !!callRecord._isReintimation;
+          etaDue = callRecord._etaDue || 1;
+        }
+      }
 
-        if (expiringBatch && expiringBatch.length > 0) {
-          callRecord = expiringBatch[0];
-          isReintimation = true;
-          etaDue = (callRecord.eta_count || 1) + 1;
-        } else {
-          // Fresh open calls with Ageing > 3 days
-          let q = supabase
-            .from("open_calls_master")
-            .select("*")
-            .eq("is_open", true)
-            .lte("carry_in_time", threeDaysAgoIso);
-
-          if (!isAdmin()) {
-            q = q.eq("cci_code", profile.cci_code);
+      // 3. Fallback to RPC if direct query yielded nothing and no skip active
+      if (!callRecord && skippedServiceOrders.size === 0) {
+        try {
+          const { data: rpcData } = await supabase.rpc("get_next_intimation_call");
+          if (rpcData?.found && rpcData.call) {
+            callRecord = rpcData.call;
+            isReintimation = !!rpcData.is_reintimation;
+            etaDue = rpcData.eta_due || 1;
           }
-
-          const { data: openBatch } = await q.order("carry_in_time", { ascending: true }).limit(20);
-
-          if (openBatch && openBatch.length > 0) {
-            const soList = openBatch.map((c) => c.service_order);
-            const { data: completedIntimations } = await supabase
-              .from("intimation_calling")
-              .select("service_order")
-              .in("service_order", soList)
-              .eq("calling_status", "Completed");
-
-            const completedSoSet = new Set((completedIntimations || []).map((i) => i.service_order));
-            callRecord = openBatch.find((c) => !completedSoSet.has(c.service_order)) || null;
-            isReintimation = false;
-            etaDue = 1;
-          }
+        } catch (e) {
+          console.warn("RPC get_next_intimation_call fallback:", e);
         }
       }
     }
@@ -613,7 +636,14 @@ function renderEtrWindow(mount, call) {
 
   // Skip button
   mount.querySelector("#btn-skip-intimation")?.addEventListener("click", () => {
-    loadNextIntimationCall();
+    if (call?.service_order) {
+      skippedServiceOrders.add(call.service_order);
+    }
+    if (window.location.hash.includes("?so=")) {
+      window.location.hash = "#/intimation/calling";
+    } else {
+      loadNextIntimationCall();
+    }
   });
 
   // Form submission
@@ -698,6 +728,10 @@ function renderEtrWindow(mount, call) {
 
       showToast(`ETA #${currentEtaNum} committed successfully for SO ${call.service_order}!`, "success");
       isSubmitting = false;
+
+      if (call?.service_order) {
+        skippedServiceOrders.delete(call.service_order);
+      }
 
       // Navigate to next call
       if (window.location.hash.includes("?so=")) {
