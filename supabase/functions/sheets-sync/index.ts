@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Supabase Edge Function: sheets-sync
 // Optional backend synchronization for Google Sheets closure data.
 // Reads sheet rows via Google Sheets API (or public CSV export), maps columns,

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Supabase Edge Function: admin-users
 // Handles privileged user management tasks (create user, reset password, toggle status)
 // securely on the server using SUPABASE_SERVICE_ROLE_KEY.
