@@ -1,6 +1,7 @@
 // ============================================================================
 // Motorola Care - Intimation Calling Pending & Open Calls Backlog Controller
-// Displays active open calls queue with dynamic Carry-In Time ageing calculation
+// Displays active open calls queue with dynamic Carry-In Time ageing calculation,
+// ETR expiry tracking, and 3-ETA re-intimation alert indicators
 // ============================================================================
 
 import { supabase, formatSupabaseError } from "./supabase.js";
@@ -14,7 +15,7 @@ let currentPage = 1;
 const PAGE_SIZE = 15;
 let searchQuery = "";
 let currentAgeingFilter = "OVER_3_DAYS"; // OVER_3_DAYS (default), ALL, 1_TO_3_DAYS, TODAY
-let currentEtrFilter = "ALL"; // ALL, PENDING, COMMITTED, NOT_REACHABLE, CALL_BACK
+let currentEtrFilter = "ALL"; // ALL, RE_INTIMATION_DUE, PENDING, COMMITTED, MAX_ETAS, NOT_REACHABLE, CALL_BACK
 
 export async function renderIntimationPendingPage(container) {
   currentPage = 1;
@@ -27,7 +28,7 @@ export async function renderIntimationPendingPage(container) {
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem;">
       <div>
         <h2 style="font-size:1.375rem; font-weight:700; color:var(--text-primary);">Open Calls &amp; ETR Intimation Backlog</h2>
-        <p style="font-size:0.875rem; color:var(--text-secondary);">Tracking active open service orders. Carry-In ageing &gt; 3 days requires mandatory customer ETR intimation.</p>
+        <p style="font-size:0.875rem; color:var(--text-secondary);">Tracking active open service orders. Carry-In ageing &gt; 3 days requires mandatory customer ETR intimation (max 3 ETAs).</p>
       </div>
 
       <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
@@ -40,8 +41,10 @@ export async function renderIntimationPendingPage(container) {
 
         <select id="open-calls-etr-filter" class="form-select" style="padding:6px 12px; font-size:0.8125rem;">
           <option value="ALL">All ETR Statuses</option>
-          <option value="PENDING">Pending Intimation</option>
-          <option value="COMMITTED">ETR Committed</option>
+          <option value="RE_INTIMATION_DUE">🚨 Expiring / Expired ETR (Re-Intimation Due)</option>
+          <option value="PENDING">Pending Initial ETR</option>
+          <option value="COMMITTED">Active ETR Committed</option>
+          <option value="MAX_ETAS">🛑 Max 3 ETAs Reached</option>
           <option value="NOT_REACHABLE">⚠️ Not Reachable</option>
           <option value="CALL_BACK">📞 Call Back Requested</option>
         </select>
@@ -70,7 +73,7 @@ export async function renderIntimationPendingPage(container) {
           { label: "Model" },
           { label: "SO Status" },
           { label: "Carry-In & Ageing" },
-          { label: "ETR Status" },
+          { label: "ETR Status (Max 3 ETAs)" },
           { label: "Action", style: "text-align:right;" },
         ],
         rowsHtml: renderTableSkeleton(8, 8),
@@ -94,18 +97,6 @@ export async function renderIntimationPendingPage(container) {
     loadOpenCallsTable();
   });
 
-  const searchInput = document.getElementById("table-search-input");
-  if (searchInput) {
-    searchInput.addEventListener(
-      "input",
-      debounce((e) => {
-        searchQuery = e.target.value.trim();
-        currentPage = 1;
-        loadOpenCallsTable();
-      }, 300)
-    );
-  }
-
   await loadIntimationKpiMetrics();
   await loadOpenCallsTable();
 }
@@ -126,81 +117,77 @@ async function loadIntimationKpiMetrics() {
     let committedCount = 0;
     let pendingCount = 0;
 
-    // 1. Try RPC get_intimation_dashboard
-    let rpcSuccess = false;
-    try {
-      const { data, error } = await supabase.rpc("get_intimation_dashboard", {
-        p_cci_code: isAdmin() ? null : profile.cci_code,
-      });
-      if (!error && data) {
-        totalOpen = data.total_open || 0;
-        criticalBacklog = data.critical_backlog || 0;
-        committedCount = data.intimated_count || 0;
-        pendingCount = data.pending_intimation || 0;
-        rpcSuccess = true;
-      }
-    } catch (e) {}
+    // Direct Supabase Query
+    const nowMs = Date.now();
+    const threeDaysAgoIso = new Date(nowMs - 3 * 24 * 60 * 60 * 1000).toISOString();
 
-    // 2. Direct Query Fallback
-    if (!rpcSuccess) {
-      let openQ = supabase.from("open_calls_master").select("id, carry_in_time", { count: "exact" }).eq("is_open", true);
-      if (!isAdmin()) openQ = openQ.eq("cci_code", profile.cci_code);
-      const { data: openRows, count: openCount } = await openQ;
-
-      totalOpen = openCount || 0;
-      const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
-      (openRows || []).forEach((r) => {
-        if (new Date(r.carry_in_time).getTime() <= threeDaysAgo) {
-          criticalBacklog++;
-        }
-      });
-
-      let intimationQ = supabase.from("intimation_calling").select("service_order", { count: "exact" }).eq("calling_status", "Completed");
-      if (!isAdmin()) intimationQ = intimationQ.eq("cci_code", profile.cci_code);
-      const { count: cCount } = await intimationQ;
-      committedCount = cCount || 0;
-      pendingCount = Math.max(0, criticalBacklog - committedCount);
+    let openQuery = supabase.from("open_calls_master").select("id, service_order, carry_in_time, current_etr_date, eta_count").eq("is_open", true);
+    if (!isAdmin()) {
+      openQuery = openQuery.eq("cci_code", profile.cci_code);
     }
+    const { data: openRows } = await openQuery;
+    const activeCalls = openRows || [];
+
+    totalOpen = activeCalls.length;
+    criticalBacklog = activeCalls.filter((c) => new Date(c.carry_in_time).getTime() <= (nowMs - 3 * 24 * 60 * 60 * 1000)).length;
+
+    // Count calls with active committed ETR vs expiring ETR
+    const todayStr = new Date().toISOString().split("T")[0];
+    const tomorrowStr = new Date(nowMs + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    
+    let expiringEtrCount = 0;
+    activeCalls.forEach((c) => {
+      if (c.current_etr_date && (c.current_etr_date <= tomorrowStr) && (c.eta_count < 3)) {
+        expiringEtrCount++;
+      }
+      if (c.current_etr_date) {
+        committedCount++;
+      }
+    });
+
+    pendingCount = Math.max(0, criticalBacklog - committedCount);
 
     mount.innerHTML = `
       ${renderKpiCard({
-        title: "Active Open Calls",
+        title: "Active Open Inventory",
         value: totalOpen.toLocaleString(),
+        subtitle: "Total open service orders",
         icon: icons.database,
-        colorScheme: "blue",
-        subtitle: "Currently in Service Center",
       })}
       ${renderKpiCard({
-        title: "> 3 Days Critical Ageing",
+        title: "Ageing > 3 Days",
         value: criticalBacklog.toLocaleString(),
-        icon: icons.alertTriangle,
-        colorScheme: criticalBacklog > 0 ? "red" : "green",
-        subtitle: "Mandatory Customer Intimation",
-      })}
-      ${renderKpiCard({
-        title: "ETR Committed",
-        value: committedCount.toLocaleString(),
-        icon: icons.checkCircle,
-        colorScheme: "green",
-        subtitle: "Customer Intimated with Date",
-      })}
-      ${renderKpiCard({
-        title: "Pending Intimation",
-        value: pendingCount.toLocaleString(),
+        subtitle: "Turnaround SLA breached",
+        badge: criticalBacklog > 0 ? "Action Req." : "Good",
+        badgeType: criticalBacklog > 0 ? "danger" : "success",
         icon: icons.clock,
-        colorScheme: pendingCount > 0 ? "amber" : "green",
-        subtitle: "Action Required by Station",
+      })}
+      ${renderKpiCard({
+        title: "ETR Expiring / Overdue",
+        value: expiringEtrCount.toLocaleString(),
+        subtitle: "Re-Intimation needed (ETA 2 or 3)",
+        badge: expiringEtrCount > 0 ? "Alert" : "Clear",
+        badgeType: expiringEtrCount > 0 ? "warning" : "success",
+        icon: icons.alertTriangle,
+      })}
+      ${renderKpiCard({
+        title: "Pending Intimations",
+        value: pendingCount.toLocaleString(),
+        subtitle: "Calls waiting for initial ETR",
+        badge: pendingCount > 0 ? "Pending" : "Cleared",
+        badgeType: pendingCount > 0 ? "info" : "neutral",
+        icon: icons.phone,
       })}
     `;
   } catch (err) {
-    console.warn("loadIntimationKpiMetrics error:", err);
+    console.warn("Intimation KPI error:", err);
   }
 }
 
 /**
  * Load open calls table with server-side filtering & pagination
  */
-export async function loadOpenCallsTable() {
+async function loadOpenCallsTable() {
   const tableMount = document.getElementById("open-calls-table-container");
   if (!tableMount) return;
 
@@ -226,7 +213,10 @@ export async function loadOpenCallsTable() {
         parts_status,
         doa_status,
         carry_in_time,
-        finish_repair_time
+        finish_repair_time,
+        current_etr_date,
+        eta_count,
+        etr_status
       `,
         { count: "exact" }
       )
@@ -262,14 +252,14 @@ export async function loadOpenCallsTable() {
 
     if (error) throw error;
 
-    // Fetch ETR status for this batch of service orders
+    // Fetch latest intimation status & attempt counts for this batch
     const soList = (rawCalls || []).map((c) => c.service_order);
     let etrMap = new Map();
 
     if (soList.length > 0) {
       const { data: intimationRows } = await supabase
         .from("intimation_calling")
-        .select("service_order, etr_date, calling_status, cci_comment, customer_comment, created_at")
+        .select("service_order, etr_date, calling_status, cci_comment, customer_comment, eta_number, created_at")
         .in("service_order", soList)
         .order("created_at", { ascending: false });
 
@@ -280,17 +270,48 @@ export async function loadOpenCallsTable() {
       });
     }
 
-    let displayCalls = rawCalls || [];
+    const todayStr = new Date().toISOString().split("T")[0];
+    const tomorrowStr = new Date(nowMs + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 
-    // Filter by ETR status if selected
-    if (currentEtrFilter === "PENDING") {
-      displayCalls = displayCalls.filter((c) => !etrMap.has(c.service_order) || etrMap.get(c.service_order).calling_status !== "Completed");
+    let displayCalls = (rawCalls || []).map((item) => {
+      const etrRecord = etrMap.get(item.service_order);
+      const committedEtr = item.current_etr_date || (etrRecord?.calling_status === "Completed" ? etrRecord.etr_date : null);
+      const etaCount = item.eta_count || (etrRecord?.eta_number || (committedEtr ? 1 : 0));
+
+      let isExpired = false;
+      let isExpiringSoon = false;
+      let isMaxEtas = etaCount >= 3;
+
+      if (committedEtr) {
+        isExpired = committedEtr < todayStr;
+        isExpiringSoon = committedEtr <= tomorrowStr && !isExpired;
+      }
+
+      return {
+        ...item,
+        etrRecord,
+        committedEtr,
+        etaCount,
+        isExpired,
+        isExpiringSoon,
+        isMaxEtas,
+        isReintimationDue: (isExpired || isExpiringSoon) && !isMaxEtas,
+      };
+    });
+
+    // Client-side Filter by ETR status if selected
+    if (currentEtrFilter === "RE_INTIMATION_DUE") {
+      displayCalls = displayCalls.filter((c) => c.isReintimationDue);
+    } else if (currentEtrFilter === "PENDING") {
+      displayCalls = displayCalls.filter((c) => !c.committedEtr && (!c.etrRecord || c.etrRecord.calling_status !== "Completed"));
     } else if (currentEtrFilter === "COMMITTED") {
-      displayCalls = displayCalls.filter((c) => etrMap.has(c.service_order) && etrMap.get(c.service_order).calling_status === "Completed");
+      displayCalls = displayCalls.filter((c) => c.committedEtr && !c.isExpired && !c.isExpiringSoon && !c.isMaxEtas);
+    } else if (currentEtrFilter === "MAX_ETAS") {
+      displayCalls = displayCalls.filter((c) => c.isMaxEtas);
     } else if (currentEtrFilter === "NOT_REACHABLE") {
-      displayCalls = displayCalls.filter((c) => etrMap.has(c.service_order) && etrMap.get(c.service_order).calling_status === "Customer Not Reachable");
+      displayCalls = displayCalls.filter((c) => c.etrRecord && c.etrRecord.calling_status === "Customer Not Reachable");
     } else if (currentEtrFilter === "CALL_BACK") {
-      displayCalls = displayCalls.filter((c) => etrMap.has(c.service_order) && etrMap.get(c.service_order).calling_status === "Call Back Required");
+      displayCalls = displayCalls.filter((c) => c.etrRecord && c.etrRecord.calling_status === "Call Back Required");
     }
 
     const totalRecords = count || 0;
@@ -309,39 +330,74 @@ export async function loadOpenCallsTable() {
         .map((item) => {
           const days = calculateAgeingDays(item.carry_in_time);
           const isCritical = days >= 3;
-          const etrRecord = etrMap.get(item.service_order);
 
-          let etrBadgeHtml = `<span class="badge badge-warning" style="font-size:0.75rem;">Pending Intimation</span>`;
-          if (etrRecord) {
-            if (etrRecord.calling_status === "Completed") {
-              etrBadgeHtml = `
-                <div>
-                  <span class="badge badge-success" style="font-size:0.75rem; font-weight:700;">
-                    ✓ ETR: ${formatDate(etrRecord.etr_date)}
-                  </span>
-                  <div style="font-size:0.7rem; color:var(--text-tertiary); margin-top:2px;">Logged: ${formatDate(etrRecord.created_at)}</div>
-                </div>
-              `;
-            } else if (etrRecord.calling_status === "Customer Not Reachable") {
-              etrBadgeHtml = `
-                <div>
-                  <span class="badge badge-warning" style="font-size:0.75rem;">⚠️ Not Reachable</span>
-                  <div style="font-size:0.7rem; color:var(--text-tertiary); margin-top:2px;">Last: ${formatDate(etrRecord.created_at)}</div>
-                </div>
-              `;
-            } else if (etrRecord.calling_status === "Call Back Required") {
-              etrBadgeHtml = `
-                <div>
-                  <span class="badge badge-info" style="font-size:0.75rem;">📞 Call Back Req.</span>
-                  <div style="font-size:0.7rem; color:var(--text-tertiary); margin-top:2px;">Last: ${formatDate(etrRecord.created_at)}</div>
-                </div>
-              `;
-            }
+          let etrBadgeHtml = `<span class="badge badge-warning" style="font-size:0.75rem;">Pending Initial ETR</span>`;
+
+          if (item.isMaxEtas) {
+            etrBadgeHtml = `
+              <div>
+                <span class="badge" style="background:#fee2e2; color:#991b1b; border:1px solid #f87171; font-size:0.75rem; font-weight:800;">
+                  🛑 ETA #3 (Max Limit Reached)
+                </span>
+                <div style="font-size:0.7rem; color:#b91c1c; margin-top:2px; font-weight:600;">Committed: ${formatDate(item.committedEtr)} &bull; Escalate</div>
+              </div>
+            `;
+          } else if (item.isExpired) {
+            etrBadgeHtml = `
+              <div>
+                <span class="badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-size:0.75rem; font-weight:700;">
+                  🔴 ETA #${item.etaCount || 1} Expired (${formatDate(item.committedEtr)})
+                </span>
+                <div style="font-size:0.7rem; color:#dc2626; margin-top:2px; font-weight:600;">Re-Intimation Needed &rarr; ETA #${(item.etaCount || 1) + 1}</div>
+              </div>
+            `;
+          } else if (item.isExpiringSoon) {
+            etrBadgeHtml = `
+              <div>
+                <span class="badge" style="background:#fef3c7; color:#92400e; border:1px solid #fcd34d; font-size:0.75rem; font-weight:700;">
+                  🟡 ETA #${item.etaCount || 1} Expiring (${formatDate(item.committedEtr)})
+                </span>
+                <div style="font-size:0.7rem; color:#b45309; margin-top:2px; font-weight:600;">Call Today &bull; Provide ETA #${(item.etaCount || 1) + 1}</div>
+              </div>
+            `;
+          } else if (item.committedEtr) {
+            etrBadgeHtml = `
+              <div>
+                <span class="badge badge-success" style="font-size:0.75rem; font-weight:700;">
+                  🟢 ETA #${item.etaCount || 1}: ${formatDate(item.committedEtr)}
+                </span>
+                <div style="font-size:0.7rem; color:var(--text-tertiary); margin-top:2px;">Active &bull; Within Window</div>
+              </div>
+            `;
+          } else if (item.etrRecord?.calling_status === "Customer Not Reachable") {
+            etrBadgeHtml = `
+              <div>
+                <span class="badge badge-warning" style="font-size:0.75rem;">⚠️ Not Reachable</span>
+                <div style="font-size:0.7rem; color:var(--text-tertiary); margin-top:2px;">Last: ${formatDate(item.etrRecord.created_at)}</div>
+              </div>
+            `;
+          } else if (item.etrRecord?.calling_status === "Call Back Required") {
+            etrBadgeHtml = `
+              <div>
+                <span class="badge badge-info" style="font-size:0.75rem;">📞 Call Back Req.</span>
+                <div style="font-size:0.7rem; color:var(--text-tertiary); margin-top:2px;">Last: ${formatDate(item.etrRecord.created_at)}</div>
+              </div>
+            `;
           }
 
           const ageingBadge = isCritical
             ? `<span class="badge" style="background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; font-weight:700; font-size:0.75rem;">⚠️ ${days} Days (&gt;3d)</span>`
             : `<span class="badge badge-neutral" style="font-size:0.75rem;">${days} Day${days === 1 ? "" : "s"}</span>`;
+
+          const actionLabel = item.isMaxEtas
+            ? "View / Escalate"
+            : item.isReintimationDue
+            ? `Re-Intimate (ETA #${(item.etaCount || 1) + 1})`
+            : item.committedEtr
+            ? "Update ETR"
+            : "Call Customer";
+
+          const actionBtnClass = item.isReintimationDue ? "btn-primary" : "btn-secondary";
 
           return `
           <tr>
@@ -366,9 +422,9 @@ export async function loadOpenCallsTable() {
             </td>
             <td>${etrBadgeHtml}</td>
             <td style="text-align:right;">
-              <a href="#/intimation/calling?so=${encodeURIComponent(item.service_order)}" class="btn-primary" style="padding:4px 10px; font-size:0.75rem; display:inline-flex; align-items:center; gap:4px;">
+              <a href="#/intimation/calling?so=${encodeURIComponent(item.service_order)}" class="${actionBtnClass}" style="padding:4px 10px; font-size:0.75rem; display:inline-flex; align-items:center; gap:4px; ${item.isReintimationDue ? 'background:#ef4444; border-color:#dc2626; color:#fff;' : ''}">
                 <span style="width:14px; height:14px;">${icons.phone}</span>
-                <span>Call Customer</span>
+                <span>${actionLabel}</span>
               </a>
             </td>
           </tr>
@@ -387,7 +443,7 @@ export async function loadOpenCallsTable() {
         { label: "Model" },
         { label: "SO Status" },
         { label: "Carry-In & Ageing" },
-        { label: "ETR Status" },
+        { label: "ETR Status (Max 3 ETAs)" },
         { label: "Action", style: "text-align:right;" },
       ],
       rowsHtml,
@@ -396,21 +452,42 @@ export async function loadOpenCallsTable() {
       totalRecords,
     });
 
-    // Pagination listeners
-    document.getElementById("btn-prev-page")?.addEventListener("click", () => {
-      if (currentPage > 1) {
-        currentPage--;
-        loadOpenCallsTable();
-      }
-    });
+    // Re-bind search input with existing search query and autofocus if user was searching
+    const searchInput = document.getElementById("table-search-input");
+    if (searchInput) {
+      searchInput.value = searchQuery;
+      searchInput.addEventListener(
+        "input",
+        debounce((e) => {
+          searchQuery = e.target.value.trim();
+          currentPage = 1;
+          loadOpenCallsTable();
+        }, 300)
+      );
+    }
 
-    document.getElementById("btn-next-page")?.addEventListener("click", () => {
-      const maxPage = Math.ceil(totalRecords / PAGE_SIZE);
-      if (currentPage < maxPage) {
-        currentPage++;
-        loadOpenCallsTable();
-      }
-    });
+    // FIX: Match IDs with table.js ('btn-page-prev' and 'btn-page-next')
+    const prevBtn = document.getElementById("btn-page-prev");
+    const nextBtn = document.getElementById("btn-page-next");
+
+    if (prevBtn) {
+      prevBtn.addEventListener("click", () => {
+        if (currentPage > 1) {
+          currentPage--;
+          loadOpenCallsTable();
+        }
+      });
+    }
+
+    if (nextBtn) {
+      nextBtn.addEventListener("click", () => {
+        const maxPage = Math.ceil(totalRecords / PAGE_SIZE);
+        if (currentPage < maxPage) {
+          currentPage++;
+          loadOpenCallsTable();
+        }
+      });
+    }
   } catch (err) {
     console.error("loadOpenCallsTable error:", err);
     tableMount.innerHTML = `

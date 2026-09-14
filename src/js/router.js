@@ -25,6 +25,7 @@ import { renderIntimationPendingPage } from "./intimation-pending.js";
 import { renderIntimationHistoryPage } from "./intimation-history.js";
 import { renderIntimationImportPage } from "./intimation-import.js";
 import { renderIntimationDashboardPage } from "./intimation-dashboard.js";
+import { renderIntimationPerformancePage } from "./intimation-performance.js";
 import { renderAdminIntimationPage } from "./admin-intimation.js";
 import { getActiveWorkspace } from "./workspace.js";
 import { escapeHtml, formatDateTime, icons } from "./utils.js";
@@ -59,6 +60,7 @@ const routes = {
   "#/intimation/calling": { render: renderIntimationCallingPage, requiresAuth: true },
   "#/intimation/pending": { render: renderIntimationPendingPage, requiresAuth: true },
   "#/intimation/history": { render: renderIntimationHistoryPage, requiresAuth: true },
+  "#/intimation/performance": { render: renderIntimationPerformancePage, requiresAuth: true },
   "#/intimation/import": { render: renderIntimationImportPage, requiresAuth: true, adminOnly: true },
   "#/intimation/admin": { render: renderAdminIntimationPage, requiresAuth: true, adminOnly: true },
 };

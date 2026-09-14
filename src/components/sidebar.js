@@ -44,14 +44,15 @@ export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0
     { path: "#/intimation/calling", label: "ETR Calling Window", icon: icons.phone, badge: ">3d ETR" },
     { path: "#/intimation/pending", label: "Open Calls Backlog", icon: icons.clock },
     { path: "#/intimation/history", label: "Intimation History", icon: icons.checkCircle },
-    { path: "#/performance", label: "My Performance", icon: icons.award },
+    { path: "#/intimation/performance", label: "ETR Performance", icon: icons.award },
     { path: "#/profile", label: "My Profile", icon: icons.user },
   ];
 
   const intimationAdminNav = [
     { section: "Intimation Analytics" },
     { path: "#/intimation/admin", label: "Intimation Admin", icon: icons.dashboard },
-    { path: "#/intimation/dashboard", label: "Intimation Overview", icon: icons.award },
+    { path: "#/intimation/dashboard", label: "Intimation Overview", icon: icons.smile },
+    { path: "#/intimation/performance", label: "ETR Performance", icon: icons.award },
     { path: "#/intimation/pending", label: "Open Calls Backlog", icon: icons.clock },
     { path: "#/intimation/history", label: "Intimation History", icon: icons.fileText },
     { section: "Operations" },

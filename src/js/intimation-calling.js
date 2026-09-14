@@ -1,6 +1,6 @@
 // ============================================================================
 // Motorola Care - Intimation Calling Workflow Controller
-// Manages ETR (Expected Time of Resolution) updates for open calls ageing > 3 days
+// Manages ETR updates, dynamic re-intimation on expiring ETAs, and 3-ETA cap
 // ============================================================================
 
 import { supabase, formatSupabaseError } from "./supabase.js";
@@ -22,7 +22,7 @@ export async function renderIntimationCallingPage(container) {
             <h2 style="font-size:1.375rem; font-weight:700; color:var(--text-primary); margin:0;">Intimation Calling Queue</h2>
           </div>
           <p style="font-size:0.875rem; color:var(--text-secondary); margin-top:0.25rem;">
-            Intimate customer with Expected Time of Resolution (ETR) for active open service orders.
+            Intimate customer with Expected Time of Resolution (ETR) for active open service orders (Max 3 ETAs per order).
           </p>
         </div>
         <div style="display:flex; gap:0.5rem;">
@@ -61,19 +61,21 @@ export async function renderIntimationCallingPage(container) {
 }
 
 /**
- * Fetch next oldest open call requiring intimation (carry_in_time > 3 days ago)
+ * Fetch next oldest open call requiring intimation (carry_in_time > 3 days ago OR expiring ETR)
  */
 export async function loadNextIntimationCall(specificSoNumber = null) {
   const mount = document.getElementById("intimation-queue-mount");
   if (!mount) return;
 
-  mount.innerHTML = renderSpinner("Fetching next open call with ageing > 3 days...");
+  mount.innerHTML = renderSpinner("Fetching eligible open call...");
 
   const profile = getCurrentProfile();
   if (!profile) return;
 
   try {
     let callRecord = null;
+    let isReintimation = false;
+    let etaDue = 1;
 
     if (specificSoNumber) {
       // Direct load by SO Number (from pending list click)
@@ -90,6 +92,8 @@ export async function loadNextIntimationCall(specificSoNumber = null) {
         const { data, error } = await supabase.rpc("get_next_intimation_call");
         if (!error && data?.found && data.call) {
           callRecord = data.call;
+          isReintimation = !!data.is_reintimation;
+          etaDue = data.eta_due || 1;
         }
       } catch (rpcErr) {
         console.warn("RPC get_next_intimation_call fallback:", rpcErr);
@@ -97,30 +101,57 @@ export async function loadNextIntimationCall(specificSoNumber = null) {
 
       // 2. Direct Supabase Query Fallback
       if (!callRecord) {
+        const todayStr = new Date().toISOString().split("T")[0];
+        const tomorrowStr = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
         const threeDaysAgoIso = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
-        let q = supabase
+
+        // Check for expiring/overdue ETRs first (Re-intimation priority)
+        let qExpiring = supabase
           .from("open_calls_master")
           .select("*")
           .eq("is_open", true)
-          .lte("carry_in_time", threeDaysAgoIso);
+          .is("finish_repair_time", null)
+          .not("current_etr_date", "is", null)
+          .lte("current_etr_date", tomorrowStr)
+          .lt("eta_count", 3);
 
         if (!isAdmin()) {
-          q = q.eq("cci_code", profile.cci_code);
+          qExpiring = qExpiring.eq("cci_code", profile.cci_code);
         }
 
-        // Exclude orders with already completed intimation
-        const { data: openBatch } = await q.order("carry_in_time", { ascending: true }).limit(20);
+        const { data: expiringBatch } = await qExpiring.order("current_etr_date", { ascending: true }).limit(1);
 
-        if (openBatch && openBatch.length > 0) {
-          const soList = openBatch.map((c) => c.service_order);
-          const { data: completedIntimations } = await supabase
-            .from("intimation_calling")
-            .select("service_order")
-            .in("service_order", soList)
-            .eq("calling_status", "Completed");
+        if (expiringBatch && expiringBatch.length > 0) {
+          callRecord = expiringBatch[0];
+          isReintimation = true;
+          etaDue = (callRecord.eta_count || 1) + 1;
+        } else {
+          // Fresh open calls with Ageing > 3 days
+          let q = supabase
+            .from("open_calls_master")
+            .select("*")
+            .eq("is_open", true)
+            .lte("carry_in_time", threeDaysAgoIso);
 
-          const completedSoSet = new Set((completedIntimations || []).map((i) => i.service_order));
-          callRecord = openBatch.find((c) => !completedSoSet.has(c.service_order)) || null;
+          if (!isAdmin()) {
+            q = q.eq("cci_code", profile.cci_code);
+          }
+
+          const { data: openBatch } = await q.order("carry_in_time", { ascending: true }).limit(20);
+
+          if (openBatch && openBatch.length > 0) {
+            const soList = openBatch.map((c) => c.service_order);
+            const { data: completedIntimations } = await supabase
+              .from("intimation_calling")
+              .select("service_order")
+              .in("service_order", soList)
+              .eq("calling_status", "Completed");
+
+            const completedSoSet = new Set((completedIntimations || []).map((i) => i.service_order));
+            callRecord = openBatch.find((c) => !completedSoSet.has(c.service_order)) || null;
+            isReintimation = false;
+            etaDue = 1;
+          }
         }
       }
     }
@@ -132,7 +163,7 @@ export async function loadNextIntimationCall(specificSoNumber = null) {
           <div class="empty-state-icon" style="color:var(--status-success-dot);">${icons.checkCircle}</div>
           <h3 style="margin-top:0.75rem; font-size:1.25rem;">All Caught Up on Intimation Calls!</h3>
           <p style="color:var(--text-secondary); max-width:480px; margin:0.5rem auto 1.5rem auto;">
-            There are no pending open calls exceeding 3 days of ageing waiting for customer ETR intimation right now.
+            There are no pending open calls requiring customer initial ETR or re-intimation right now.
           </p>
           <div style="display:flex; justify-content:center; gap:0.75rem; flex-wrap:wrap;">
             <a href="#/intimation/pending" class="btn-primary">View All Open Calls</a>
@@ -144,21 +175,27 @@ export async function loadNextIntimationCall(specificSoNumber = null) {
     }
 
     currentCall = callRecord;
+    currentCall.is_reintimation = isReintimation;
 
-    // Check previous intimation attempts (unreachable, call back)
+    // Check past intimation attempts & completed ETAs
     try {
       const { data: pastAttempts } = await supabase
         .from("intimation_calling")
-        .select("etr_date, calling_status, cci_comment, customer_comment, created_at")
+        .select("etr_date, calling_status, cci_comment, customer_comment, eta_number, revision_reason, created_at")
         .eq("service_order", currentCall.service_order)
         .order("created_at", { ascending: false });
 
-      if (pastAttempts && pastAttempts.length > 0) {
-        currentCall.pastAttempts = pastAttempts;
-      }
+      currentCall.pastAttempts = pastAttempts || [];
     } catch (e) {
       console.warn("Could not load past intimation attempts:", e);
+      currentCall.pastAttempts = [];
     }
+
+    // Determine current ETA count and due ETA sequence
+    const completedPast = (currentCall.pastAttempts || []).filter((a) => a.calling_status === "Completed");
+    currentCall.completedEtasCount = completedPast.length;
+    currentCall.currentEtaNumber = Math.min(3, currentCall.completedEtasCount + 1);
+    currentCall.isMaxEtasReached = currentCall.completedEtasCount >= 3;
 
     renderEtrWindow(mount, currentCall);
   } catch (err) {
@@ -176,7 +213,7 @@ export async function loadNextIntimationCall(specificSoNumber = null) {
 }
 
 /**
- * Render the ETR Update Window with all 9 required info fields and 3 input fields
+ * Render the ETR Update Window with all 9 required info fields, 3-ETA stepper, and input form
  */
 function renderEtrWindow(mount, call) {
   const ageingDays = calculateAgeingDays(call.carry_in_time);
@@ -191,30 +228,46 @@ function renderEtrWindow(mount, call) {
   const defaultEtrDate = tomorrow.toISOString().split("T")[0];
   const todayStr = new Date().toISOString().split("T")[0];
 
-  // Attempt History HTML
   const pastAttempts = call.pastAttempts || [];
+  const completedPast = pastAttempts.filter((a) => a.calling_status === "Completed");
+  const latestCompletedEtr = completedPast.length > 0 ? completedPast[0] : null;
+
+  const isReintimation = call.completedEtasCount > 0 && !call.isMaxEtasReached;
+  const isMaxEtas = call.isMaxEtasReached;
+  const currentEtaNum = call.currentEtaNumber;
+
+  // Attempt History HTML
   let attemptHistoryHtml = "";
   if (pastAttempts.length > 0) {
-    const latest = pastAttempts[0];
-    const isUnreachable = latest.calling_status === "Customer Not Reachable";
-    const bg = isUnreachable ? "#fffbeb" : "#eff6ff";
-    const border = isUnreachable ? "#fde68a" : "#bfdbfe";
-
     attemptHistoryHtml = `
-      <div style="margin-top:1.25rem; padding:0.875rem 1rem; background:${bg}; border:1px solid ${border}; border-radius:8px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
-          <div style="display:flex; align-items:center; gap:0.4rem;">
-            <span style="font-size:1.1rem;">${isUnreachable ? "⚠️" : "📞"}</span>
-            <strong style="color:var(--text-primary); font-size:0.875rem;">Previous Intimation History (${pastAttempts.length} attempt${pastAttempts.length > 1 ? "s" : ""})</strong>
-          </div>
-          <span class="badge ${isUnreachable ? "badge-warning" : "badge-info"}" style="font-size:0.75rem;">
-            ${escapeHtml(latest.calling_status)}
-          </span>
+      <div style="margin-top:1.25rem; padding:1rem; background:var(--bg-surface-secondary); border:1px solid var(--border-subtle); border-radius:var(--radius-lg);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+          <strong style="color:var(--text-primary); font-size:0.875rem; display:flex; align-items:center; gap:0.35rem;">
+            <span>${icons.clock}</span>
+            <span>Intimation &amp; ETA History (${pastAttempts.length} records)</span>
+          </strong>
+          <span style="font-size:0.75rem; color:var(--text-tertiary);">Max Limit: 3 ETAs</span>
         </div>
-        <div style="font-size:0.8125rem; color:var(--text-secondary); margin-top:0.35rem;">
-          Last Attempt: <strong>${formatDateTime(latest.created_at)}</strong>
-          ${latest.etr_date ? ` • Committed ETR: <strong>${formatDate(latest.etr_date)}</strong>` : ""}
-          ${latest.customer_comment || latest.cci_comment ? ` • Remarks: <em>"${escapeHtml(latest.customer_comment || latest.cci_comment)}"</em>` : ""}
+
+        <div style="display:flex; flex-direction:column; gap:0.5rem;">
+          ${pastAttempts.map((attempt, idx) => {
+            const isCompleted = attempt.calling_status === "Completed";
+            const badgeClass = isCompleted ? "badge-success" : attempt.calling_status === "Customer Not Reachable" ? "badge-warning" : "badge-info";
+            return `
+              <div style="padding:0.6rem 0.75rem; background:#fff; border:1px solid var(--border-subtle); border-radius:6px; font-size:0.8125rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.25rem;">
+                  <div>
+                    ${attempt.eta_number ? `<strong style="color:var(--moto-blue-accent);">ETA #${attempt.eta_number}:</strong> ` : ""}
+                    ${attempt.etr_date ? `<strong style="color:var(--text-primary);">${formatDate(attempt.etr_date)}</strong>` : ""}
+                    <span style="color:var(--text-tertiary); font-size:0.75rem; margin-left:6px;">&bull; ${formatDateTime(attempt.created_at)}</span>
+                  </div>
+                  <span class="badge ${badgeClass}" style="font-size:0.7rem;">${escapeHtml(attempt.calling_status)}</span>
+                </div>
+                ${attempt.revision_reason ? `<div style="color:#b45309; font-size:0.75rem; margin-top:2px;"><strong>Revision Reason:</strong> ${escapeHtml(attempt.revision_reason)}</div>` : ""}
+                ${attempt.cci_comment || attempt.customer_comment ? `<div style="color:var(--text-secondary); font-size:0.75rem; margin-top:2px;"><em>"${escapeHtml(attempt.customer_comment || attempt.cci_comment)}"</em></div>` : ""}
+              </div>
+            `;
+          }).join("")}
         </div>
       </div>
     `;
@@ -237,6 +290,56 @@ function renderEtrWindow(mount, call) {
   }
 
   mount.innerHTML = `
+    <!-- 3-ETA Stepper Banner -->
+    <div style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--radius-lg); padding:1rem 1.25rem; margin-bottom:1.25rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+      <div>
+        <div style="font-size:0.75rem; text-transform:uppercase; font-weight:800; color:var(--text-tertiary); letter-spacing:0.5px;">Turnaround Intimation Policy</div>
+        <div style="font-size:1.1rem; font-weight:700; color:var(--text-primary); margin-top:2px;">
+          ${isMaxEtas
+            ? `<span style="color:#ef4444;">Maximum 3 ETAs Reached (Limit Exceeded)</span>`
+            : isReintimation
+            ? `<span style="color:#f59e0b;">Re-Intimation Due: Providing ETA #${currentEtaNum} of 3</span>`
+            : `<span>Initial Customer Intimation: ETA #1 of 3</span>`
+          }
+        </div>
+      </div>
+
+      <!-- Stepper Pill Indicators -->
+      <div style="display:flex; align-items:center; gap:0.5rem;">
+        <span class="badge" style="padding:6px 10px; font-weight:700; ${call.completedEtasCount >= 1 ? 'background:#dcfce7; color:#15803d; border:1px solid #86efac;' : currentEtaNum === 1 ? 'background:#e0f2fe; color:#0369a1; border:1px solid #7dd3fc;' : 'background:#f1f5f9; color:#94a3b8;'}">
+          ${call.completedEtasCount >= 1 ? '✓ ETA #1' : 'ETA #1'}
+        </span>
+        <span style="color:#cbd5e1; font-weight:700;">&rarr;</span>
+        <span class="badge" style="padding:6px 10px; font-weight:700; ${call.completedEtasCount >= 2 ? 'background:#dcfce7; color:#15803d; border:1px solid #86efac;' : currentEtaNum === 2 ? 'background:#fef3c7; color:#b45309; border:1px solid #fcd34d;' : 'background:#f1f5f9; color:#94a3b8;'}">
+          ${call.completedEtasCount >= 2 ? '✓ ETA #2' : 'ETA #2'}
+        </span>
+        <span style="color:#cbd5e1; font-weight:700;">&rarr;</span>
+        <span class="badge" style="padding:6px 10px; font-weight:700; ${call.completedEtasCount >= 3 ? 'background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5;' : currentEtaNum === 3 ? 'background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5;' : 'background:#f1f5f9; color:#94a3b8;'}">
+          ${call.completedEtasCount >= 3 ? '🛑 ETA #3 (Max)' : 'ETA #3 (Final)'}
+        </span>
+      </div>
+    </div>
+
+    <!-- Alert Banner for Expired / Expiring ETR -->
+    ${isReintimation && latestCompletedEtr ? `
+      <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:var(--radius-lg); padding:1rem 1.25rem; margin-bottom:1.25rem; display:flex; gap:0.75rem; align-items:flex-start;">
+        <span style="color:#f59e0b; font-size:1.25rem; margin-top:2px;">⚠️</span>
+        <div style="font-size:0.875rem; color:#92400e; line-height:1.5;">
+          <strong>Previous ETR Expired / Expiring:</strong> Previous committed ETR was <strong>${formatDate(latestCompletedEtr.etr_date)}</strong>. Since repair remains open, call customer to communicate revised resolution date (ETA #${currentEtaNum}) and capture the extension reason.
+        </div>
+      </div>
+    ` : ""}
+
+    <!-- Critical Alert if 3 ETAs reached -->
+    ${isMaxEtas ? `
+      <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:var(--radius-lg); padding:1rem 1.25rem; margin-bottom:1.25rem; display:flex; gap:0.75rem; align-items:flex-start;">
+        <span style="color:#dc2626; font-size:1.35rem; margin-top:2px;">🛑</span>
+        <div style="font-size:0.875rem; color:#991b1b; line-height:1.5;">
+          <strong>Maximum 3 ETAs Limit Reached:</strong> This service order has already been provided with the maximum permitted 3 customer ETAs under company turnaround policy. Additional ETA commitments are locked. Please escalate directly to the Service Center Manager or Technical Lead for priority resolution.
+        </div>
+      </div>
+    ` : ""}
+
     <!-- Customer Header & Phone Contact Card -->
     <div class="customer-detail-card" style="margin-bottom:1.25rem;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.75rem;">
@@ -344,17 +447,25 @@ function renderEtrWindow(mount, call) {
     </div>
 
     <!-- ETR UPDATE WINDOW (INTERACTIVE INPUT FORM) -->
-    <form id="intimation-etr-form" class="call-feedback-form-card" novalidate style="border-top:4px solid var(--moto-blue-accent);">
+    <form id="intimation-etr-form" class="call-feedback-form-card" novalidate style="border-top:4px solid ${isMaxEtas ? '#ef4444' : isReintimation ? '#f59e0b' : 'var(--moto-blue-accent)'};">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.5rem;">
         <div>
           <h3 style="font-size:1.15rem; font-weight:700; color:var(--text-primary); margin:0;">
-            ETR Update &amp; Customer Intimation Commitment
+            ${isMaxEtas
+              ? `ETR Commitment Locked (Max 3 Reached)`
+              : `Updating ETA #${currentEtaNum} of 3 (Expected Time of Resolution)`
+            }
           </h3>
           <p style="font-size:0.8125rem; color:var(--text-secondary); margin-top:2px;">
-            Provide the Expected Time of Resolution (ETR) communicated to the customer.
+            ${isMaxEtas
+              ? `You can still record reachability attempts or internal notes, but ETR extension is capped.`
+              : `Communicate realistic resolution date to customer. Cap of 3 ETAs per order.`
+            }
           </p>
         </div>
-        <span class="badge badge-info" style="font-size:0.75rem;">Mandatory Customer Intimation</span>
+        <span class="badge ${isMaxEtas ? 'badge-danger' : 'badge-info'}" style="font-size:0.75rem;">
+          ${isMaxEtas ? 'Policy Capped' : `ETA #${currentEtaNum}`}
+        </span>
       </div>
 
       <!-- Calling Reachability Status -->
@@ -362,18 +473,18 @@ function renderEtrWindow(mount, call) {
         <label class="form-label" style="font-weight:600;">Calling Outcome Status *</label>
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:0.75rem;">
           <label style="display:flex; align-items:center; gap:0.5rem; padding:10px 14px; border:1px solid var(--border-medium); border-radius:8px; cursor:pointer; background:var(--bg-surface-subtle);" id="label-status-completed">
-            <input type="radio" name="intimation-status" value="Completed" checked style="accent-color:var(--moto-blue-accent);">
+            <input type="radio" name="intimation-status" value="Completed" ${isMaxEtas ? "disabled" : "checked"} style="accent-color:var(--moto-blue-accent);">
             <div>
               <strong style="display:block; font-size:0.875rem; color:var(--text-primary);">Customer Intimated &amp; Agreed</strong>
-              <span style="font-size:0.75rem; color:var(--text-secondary);">ETR successfully committed</span>
+              <span style="font-size:0.75rem; color:var(--text-secondary);">${isMaxEtas ? 'Disabled (Limit reached)' : `Commit ETA #${currentEtaNum}`}</span>
             </div>
           </label>
 
           <label style="display:flex; align-items:center; gap:0.5rem; padding:10px 14px; border:1px solid var(--border-medium); border-radius:8px; cursor:pointer; background:var(--bg-surface-subtle);" id="label-status-unreachable">
-            <input type="radio" name="intimation-status" value="Customer Not Reachable" style="accent-color:var(--moto-blue-accent);">
+            <input type="radio" name="intimation-status" value="Customer Not Reachable" ${isMaxEtas ? "checked" : ""} style="accent-color:var(--moto-blue-accent);">
             <div>
               <strong style="display:block; font-size:0.875rem; color:var(--text-primary);">Not Reachable / Busy</strong>
-              <span style="font-size:0.75rem; color:var(--text-secondary);">Kept pending in backlog</span>
+              <span style="font-size:0.75rem; color:var(--text-secondary);">Log call attempt in history</span>
             </div>
           </label>
 
@@ -387,10 +498,28 @@ function renderEtrWindow(mount, call) {
         </div>
       </div>
 
-      <!-- Input Field 1: ETR Date (Mandatory) -->
+      <!-- Revision Reason (Shown for ETA 2 or 3) -->
+      ${currentEtaNum > 1 && !isMaxEtas ? `
+        <div class="form-group" style="margin-bottom:1.25rem;">
+          <label for="select-revision-reason" class="form-label" style="font-weight:700; color:#b45309;">
+            Reason for Delay / ETA Extension #${currentEtaNum} *
+          </label>
+          <select id="select-revision-reason" class="form-select" style="max-width:400px; font-size:0.875rem; font-weight:600;">
+            <option value="Parts in transit / delayed from hub">Parts in transit / delayed from hub</option>
+            <option value="Component-level diagnostics in progress">Component-level diagnostics in progress</option>
+            <option value="Awaiting customer estimate confirmation">Awaiting customer estimate confirmation</option>
+            <option value="Repaired unit in soak test / QC testing">Repaired unit in soak test / QC testing</option>
+            <option value="Motherboard replacement / advanced level repair">Motherboard replacement / advanced level repair</option>
+            <option value="Customer requested postponement of pickup">Customer requested postponement of pickup</option>
+            <option value="Other technical delay">Other technical delay</option>
+          </select>
+        </div>
+      ` : ""}
+
+      <!-- Input Field 1: ETR Date (Mandatory unless max ETAs reached) -->
       <div class="form-group" style="margin-bottom:1.25rem;">
         <label for="input-etr-date" class="form-label" style="font-weight:700; color:var(--text-primary);">
-          Expected Time of Resolution (ETR Date) *
+          Expected Time of Resolution (ETA #${currentEtaNum} Date) *
         </label>
         <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
           <input 
@@ -401,16 +530,22 @@ function renderEtrWindow(mount, call) {
             required 
             min="${todayStr}"
             value="${defaultEtrDate}"
+            ${isMaxEtas ? "disabled" : ""}
           >
-          <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
-            <button type="button" class="btn-secondary btn-quick-etr" data-days="1" style="padding:5px 10px; font-size:0.75rem;">Tomorrow</button>
-            <button type="button" class="btn-secondary btn-quick-etr" data-days="2" style="padding:5px 10px; font-size:0.75rem;">In 2 Days</button>
-            <button type="button" class="btn-secondary btn-quick-etr" data-days="4" style="padding:5px 10px; font-size:0.75rem;">In 4 Days</button>
-            <button type="button" class="btn-secondary btn-quick-etr" data-days="7" style="padding:5px 10px; font-size:0.75rem;">In 1 Week</button>
-          </div>
+          ${!isMaxEtas ? `
+            <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
+              <button type="button" class="btn-secondary btn-quick-etr" data-days="1" style="padding:5px 10px; font-size:0.75rem;">Tomorrow</button>
+              <button type="button" class="btn-secondary btn-quick-etr" data-days="2" style="padding:5px 10px; font-size:0.75rem;">In 2 Days</button>
+              <button type="button" class="btn-secondary btn-quick-etr" data-days="4" style="padding:5px 10px; font-size:0.75rem;">In 4 Days</button>
+              <button type="button" class="btn-secondary btn-quick-etr" data-days="7" style="padding:5px 10px; font-size:0.75rem;">In 1 Week</button>
+            </div>
+          ` : ""}
         </div>
         <span style="font-size:0.75rem; color:var(--text-secondary); margin-top:4px; display:block;">
-          The estimated date when customer device repair will be completed and ready for pickup.
+          ${isMaxEtas
+            ? "New ETR date disabled because order has already reached 3 customer ETAs."
+            : "The estimated date when customer device repair will be completed and ready for pickup."
+          }
         </span>
       </div>
 
@@ -423,7 +558,7 @@ function renderEtrWindow(mount, call) {
           id="input-cci-comment" 
           class="form-textarea" 
           rows="2" 
-          placeholder="e.g. Part ordered under warranty; delayed at ASP central hub; board replacement in progress."
+          placeholder="e.g. Parts tracking # dispatched; customer notified of expected delivery date."
           style="font-size:0.875rem;"
         ></textarea>
       </div>
@@ -437,7 +572,7 @@ function renderEtrWindow(mount, call) {
           id="input-customer-comment" 
           class="form-textarea" 
           rows="2" 
-          placeholder="e.g. Customer agreed to wait until Friday; requested SMS notification once ready."
+          placeholder="e.g. Customer agreed to wait until committed date; asked for callback morning of pickup."
           style="font-size:0.875rem;"
         ></textarea>
       </div>
@@ -449,10 +584,16 @@ function renderEtrWindow(mount, call) {
           <span style="display:inline-block; width:16px; height:16px;">&rarr;</span>
         </button>
 
-        <button type="submit" id="btn-submit-intimation" class="btn-primary" style="padding:10px 24px; font-size:0.95rem; display:flex; align-items:center; gap:0.5rem;">
-          <span style="display:block; width:18px; height:18px;">${icons.checkCircle}</span>
-          <span>Submit ETR &amp; Next Call</span>
-        </button>
+        ${isMaxEtas ? `
+          <button type="submit" id="btn-submit-intimation" class="btn-secondary" style="padding:10px 24px; font-size:0.95rem; display:flex; align-items:center; gap:0.5rem;">
+            <span>Log Attempt / Notes (ETA Locked)</span>
+          </button>
+        ` : `
+          <button type="submit" id="btn-submit-intimation" class="btn-primary" style="padding:10px 24px; font-size:0.95rem; display:flex; align-items:center; gap:0.5rem; ${isReintimation ? 'background:#ea580c; border-color:#c2410c;' : ''}">
+            <span style="display:block; width:18px; height:18px;">${icons.checkCircle}</span>
+            <span>Commit ETA #${currentEtaNum} &amp; Next Call</span>
+          </button>
+        `}
       </div>
     </form>
   `;
@@ -483,11 +624,17 @@ function renderEtrWindow(mount, call) {
 
     const etrDate = mount.querySelector("#input-etr-date")?.value;
     const callingStatus = mount.querySelector('input[name="intimation-status"]:checked')?.value || "Completed";
+    const revisionReason = mount.querySelector("#select-revision-reason")?.value || null;
     const cciComment = mount.querySelector("#input-cci-comment")?.value.trim() || null;
     const customerComment = mount.querySelector("#input-customer-comment")?.value.trim() || null;
 
-    if (!etrDate) {
+    if (callingStatus === "Completed" && !etrDate) {
       showToast("Please select a valid ETR date.", "warning");
+      return;
+    }
+
+    if (callingStatus === "Completed" && isMaxEtas) {
+      showToast("Cannot commit a 4th ETA for this Service Order. Policy limit reached.", "error");
       return;
     }
 
@@ -495,25 +642,31 @@ function renderEtrWindow(mount, call) {
     const submitBtn = mount.querySelector("#btn-submit-intimation");
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.innerHTML = `<span>Saving ETR...</span>`;
+      submitBtn.innerHTML = `<span>Saving...</span>`;
     }
 
     try {
-      // 1. Try RPC submit_intimation_call
+      // 1. Try RPC submit_intimation_call with revision reason
       let rpcSuccess = false;
       try {
         const { data: rpcRes, error: rpcErr } = await supabase.rpc("submit_intimation_call", {
           p_service_order: call.service_order,
           p_cci_code: call.cci_code,
-          p_etr_date: etrDate,
+          p_etr_date: etrDate || todayStr,
           p_calling_status: callingStatus,
           p_cci_comment: cciComment,
           p_customer_comment: customerComment,
+          p_revision_reason: revisionReason,
         });
         if (!rpcErr && rpcRes?.success) {
           rpcSuccess = true;
+        } else if (rpcErr) {
+          throw rpcErr;
         }
       } catch (e) {
+        if (e.message && e.message.includes("Maximum 3 ETAs")) {
+          throw e;
+        }
         console.warn("RPC submit_intimation_call fallback to direct insert:", e);
       }
 
@@ -523,26 +676,43 @@ function renderEtrWindow(mount, call) {
         const { error: insertErr } = await supabase.from("intimation_calling").insert({
           service_order: call.service_order,
           cci_code: call.cci_code,
-          etr_date: etrDate,
+          etr_date: etrDate || todayStr,
           calling_status: callingStatus,
           cci_comment: cciComment,
           customer_comment: customerComment,
+          eta_number: currentEtaNum,
+          revision_reason: revisionReason,
           calling_user_id: profile?.id || null,
         });
         if (insertErr) throw insertErr;
+
+        if (callingStatus === "Completed") {
+          await supabase.from("open_calls_master").update({
+            current_etr_date: etrDate,
+            eta_count: currentEtaNum,
+            etr_status: currentEtaNum >= 3 ? "MAX_ETAS_REACHED" : "COMMITTED",
+            updated_at: new Date().toISOString(),
+          }).eq("service_order", call.service_order);
+        }
       }
 
-      showToast(`ETR committed successfully for SO ${call.service_order}!`, "success");
-      await loadNextIntimationCall();
+      showToast(`ETA #${currentEtaNum} committed successfully for SO ${call.service_order}!`, "success");
+      isSubmitting = false;
+
+      // Navigate to next call
+      if (window.location.hash.includes("?so=")) {
+        window.location.hash = "#/intimation/calling";
+      } else {
+        await loadNextIntimationCall();
+      }
     } catch (err) {
+      isSubmitting = false;
       console.error("submit_intimation_call error:", err);
       showToast(`Submission failed: ${formatSupabaseError(err)}`, "error");
       if (submitBtn) {
         submitBtn.disabled = false;
-        submitBtn.innerHTML = `<span>Submit ETR &amp; Next Call</span>`;
+        submitBtn.innerHTML = `<span>Try Again</span>`;
       }
-    } finally {
-      isSubmitting = false;
     }
   });
 }
