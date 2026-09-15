@@ -374,7 +374,7 @@ export async function loadPendingTable() {
             <td>${renderAgeingBadge(days)}</td>
             <td>${attemptBadgeHtml}</td>
             <td style="text-align:right;">
-              <a href="#/happy-calling" class="btn-secondary" style="padding:4px 10px; font-size:0.75rem; display:inline-flex; align-items:center; gap:4px;">
+              <a href="#/happy-calling?so=${encodeURIComponent(item.so_number)}" class="btn-secondary" style="padding:4px 10px; font-size:0.75rem; display:inline-flex; align-items:center; gap:4px;">
                 <span style="width:14px; height:14px;">${icons.phone}</span>
                 <span>Call Now</span>
               </a>

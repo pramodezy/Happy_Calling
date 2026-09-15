@@ -12,6 +12,7 @@ import { renderSpinner } from "../components/loading.js";
 let currentCall = null;
 let isSubmitting = false;
 const skippedServiceOrders = new Set();
+const attemptedServiceOrders = new Set();
 
 export async function renderIntimationCallingPage(container) {
   container.innerHTML = `
@@ -80,13 +81,17 @@ export async function loadNextIntimationCall(specificSoNumber = null) {
 
     if (specificSoNumber) {
       // Direct load by SO Number (from pending list click)
-      let query = supabase.from("open_calls_master").select("*").eq("service_order", specificSoNumber);
-      if (!isAdmin()) {
+      let query = supabase.from("open_calls_master").select("*").eq("service_order", specificSoNumber.trim());
+      if (!isAdmin() && profile?.cci_code) {
         query = query.eq("cci_code", profile.cci_code);
       }
-      const { data, error } = await query.maybeSingle();
+      const { data, error } = await query.order("created_at", { ascending: false }).limit(1);
       if (error) throw error;
-      callRecord = data;
+      callRecord = data && data.length > 0 ? data[0] : null;
+      if (callRecord) {
+        isReintimation = (callRecord.eta_count > 0 || !!callRecord.current_etr_date);
+        etaDue = isReintimation ? (callRecord.eta_count || 1) + 1 : 1;
+      }
     } else {
       const todayStr = new Date().toISOString().split("T")[0];
       const tomorrowStr = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
@@ -147,15 +152,46 @@ export async function loadNextIntimationCall(specificSoNumber = null) {
         candidateBatch.push(...pendingFresh);
       }
 
+      // Exclude calls already attempted in this session
+      candidateBatch = candidateBatch.filter((c) => !attemptedServiceOrders.has(c.service_order));
+
       if (candidateBatch.length > 0) {
+        // Query recent attempts today to deprioritize calls already attempted today
+        const candidateSos = candidateBatch.map((c) => c.service_order);
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
+        try {
+          const { data: todayAttempts } = await supabase
+            .from("intimation_calling")
+            .select("service_order")
+            .in("service_order", candidateSos)
+            .gte("created_at", todayStart.toISOString());
+
+          const attemptedTodaySet = new Set((todayAttempts || []).map((a) => a.service_order));
+
+          // Sort so calls NOT attempted today come first
+          candidateBatch.sort((a, b) => {
+            const aToday = attemptedTodaySet.has(a.service_order) ? 1 : 0;
+            const bToday = attemptedTodaySet.has(b.service_order) ? 1 : 0;
+            if (aToday !== bToday) return aToday - bToday;
+            return 0;
+          });
+        } catch (e) {
+          console.warn("Could not check today intimation attempts:", e);
+        }
+
         // Pick first candidate not yet skipped in this session
         callRecord = candidateBatch.find((c) => !skippedServiceOrders.has(c.service_order));
 
-        // If all available calls were skipped, wrap around
+        // If all available calls were skipped, wrap around ONLY to skipped calls
         if (!callRecord && skippedServiceOrders.size > 0) {
-          skippedServiceOrders.clear();
-          callRecord = candidateBatch[0];
-          showToast("Reached end of pending queue. Returning to first skipped call.", "info");
+          const skippedCandidates = candidateBatch.filter((c) => skippedServiceOrders.has(c.service_order));
+          if (skippedCandidates.length > 0) {
+            skippedServiceOrders.clear();
+            callRecord = skippedCandidates[0];
+            showToast("Reached end of pending queue. Returning to first skipped call.", "info");
+          }
         }
 
         if (callRecord) {
@@ -164,11 +200,11 @@ export async function loadNextIntimationCall(specificSoNumber = null) {
         }
       }
 
-      // 3. Fallback to RPC if direct query yielded nothing and no skip active
-      if (!callRecord && skippedServiceOrders.size === 0) {
+      // 3. Fallback to RPC if direct query yielded nothing and no skip/attempt active
+      if (!callRecord && skippedServiceOrders.size === 0 && attemptedServiceOrders.size === 0) {
         try {
           const { data: rpcData } = await supabase.rpc("get_next_intimation_call");
-          if (rpcData?.found && rpcData.call) {
+          if (rpcData?.found && rpcData.call && !attemptedServiceOrders.has(rpcData.call.service_order)) {
             callRecord = rpcData.call;
             isReintimation = !!rpcData.is_reintimation;
             etaDue = rpcData.eta_due || 1;
@@ -730,6 +766,7 @@ function renderEtrWindow(mount, call) {
       isSubmitting = false;
 
       if (call?.service_order) {
+        attemptedServiceOrders.add(call.service_order);
         skippedServiceOrders.delete(call.service_order);
       }
 

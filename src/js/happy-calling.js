@@ -7,6 +7,7 @@ import { renderSpinner } from "../components/loading.js";
 let currentClosure = null;
 let isSubmitting = false;
 const skippedClosureIds = new Set();
+const attemptedClosureIds = new Set();
 
 export async function renderHappyCallingPage(container) {
   container.innerHTML = `
@@ -60,12 +61,12 @@ async function loadNextClosure(specificSoNumber = null) {
     let targetClosure = null;
 
     if (specificSoNumber) {
-      let q = supabase.from("closure_master").select("*").eq("so_number", specificSoNumber);
+      let q = supabase.from("closure_master").select("*").eq("so_number", specificSoNumber.trim());
       if (!isAdmin() && profile?.cci_code) {
         q = q.eq("cci_code", profile.cci_code);
       }
-      const { data } = await q.maybeSingle();
-      targetClosure = data;
+      const { data } = await q.order("created_at", { ascending: false }).limit(1);
+      targetClosure = data && data.length > 0 ? data[0] : null;
     } else {
       // Query candidate pending closures
       let q = supabase
@@ -98,35 +99,57 @@ async function loadNextClosure(specificSoNumber = null) {
       if (error) throw error;
 
       if (batch && batch.length > 0) {
-        // Exclude completed calls
         const cIds = batch.map((c) => c.closure_id);
-        const { data: completed } = await supabase
+        const { data: attempts } = await supabase
           .from("happy_calling")
-          .select("closure_id")
-          .in("closure_id", cIds)
-          .eq("calling_status", "Completed");
+          .select("closure_id, calling_status, calling_date, created_at")
+          .in("closure_id", cIds);
 
-        const completedSet = new Set((completed || []).map((c) => c.closure_id));
-        const pendingBatch = batch.filter((c) => !completedSet.has(c.closure_id));
+        const completedSet = new Set((attempts || []).filter((a) => a.calling_status === "Completed").map((c) => c.closure_id));
+
+        // Exclude calls completed in DB and calls already attempted in this session
+        let pendingBatch = batch.filter(
+          (c) => !completedSet.has(c.closure_id) && !attemptedClosureIds.has(c.closure_id) && !attemptedClosureIds.has(c.id)
+        );
 
         if (pendingBatch.length > 0) {
+          // Prioritize fresh/unattempted calls over calls already attempted today
+          const todayStr = new Date().toISOString().split("T")[0];
+          const attemptedTodaySet = new Set();
+          (attempts || []).forEach((a) => {
+            const aDate = a.calling_date || (a.created_at ? a.created_at.split("T")[0] : "");
+            if (aDate === todayStr) {
+              attemptedTodaySet.add(a.closure_id);
+            }
+          });
+
+          pendingBatch.sort((a, b) => {
+            const aToday = attemptedTodaySet.has(a.closure_id) ? 1 : 0;
+            const bToday = attemptedTodaySet.has(b.closure_id) ? 1 : 0;
+            if (aToday !== bToday) return aToday - bToday;
+            return 0;
+          });
+
           // Find first call that user has NOT skipped in this session
           targetClosure = pendingBatch.find((c) => !skippedClosureIds.has(c.closure_id) && !skippedClosureIds.has(c.id));
 
-          // If all available pending calls have been skipped, wrap around
+          // If all available pending calls have been skipped, wrap around ONLY to skipped calls
           if (!targetClosure && skippedClosureIds.size > 0) {
-            skippedClosureIds.clear();
-            targetClosure = pendingBatch[0];
-            showToast("Reached end of pending queue. Returning to first skipped call.", "info");
+            const skippedCandidates = pendingBatch.filter((c) => skippedClosureIds.has(c.closure_id) || skippedClosureIds.has(c.id));
+            if (skippedCandidates.length > 0) {
+              skippedClosureIds.clear();
+              targetClosure = skippedCandidates[0];
+              showToast("Reached end of pending queue. Returning to first skipped call.", "info");
+            }
           }
         }
       }
 
-      // Fallback to RPC if direct query yielded nothing and no skip active
-      if (!targetClosure && skippedClosureIds.size === 0) {
+      // Fallback to RPC if direct query yielded nothing and no skip/attempt active
+      if (!targetClosure && skippedClosureIds.size === 0 && attemptedClosureIds.size === 0) {
         try {
           const { data: rpcData } = await supabase.rpc("get_next_pending_closure");
-          if (rpcData?.found && rpcData.closure) {
+          if (rpcData?.found && rpcData.closure && !attemptedClosureIds.has(rpcData.closure.closure_id)) {
             targetClosure = rpcData.closure;
           }
         } catch (e) {
@@ -607,6 +630,8 @@ function attachFormEvents() {
       if (error) throw error;
 
       if (currentClosure) {
+        attemptedClosureIds.add(currentClosure.closure_id);
+        if (currentClosure.id) attemptedClosureIds.add(currentClosure.id);
         skippedClosureIds.delete(currentClosure.closure_id);
         if (currentClosure.id) skippedClosureIds.delete(currentClosure.id);
       }
@@ -614,7 +639,11 @@ function attachFormEvents() {
       showToast(`Happy Calling submitted successfully for SO ${soNumber}!`, "success");
 
       // Seamlessly advance to the next pending closure
-      await loadNextClosure();
+      if (window.location.hash.includes("?so=")) {
+        window.location.hash = "#/happy-calling";
+      } else {
+        await loadNextClosure();
+      }
     } catch (err) {
       console.error("Submission error:", err);
       showToast(formatSupabaseError(err), "error");
