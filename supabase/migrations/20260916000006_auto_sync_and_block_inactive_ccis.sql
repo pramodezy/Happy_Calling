@@ -177,3 +177,51 @@ BEGIN
     RETURN to_jsonb(v_closure);
 END;
 $$;
+
+-- 5. ADMIN RESET USER PASSWORD (RPC DIRECT EXECUTION, NO EDGE FUNCTION NEEDED)
+CREATE OR REPLACE FUNCTION public.admin_reset_user_password(
+    p_auth_user_id UUID,
+    p_new_password TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+BEGIN
+    IF NOT public.is_admin() THEN
+        RAISE EXCEPTION 'Forbidden: Only administrators can reset user passwords';
+    END IF;
+
+    IF length(p_new_password) < 6 THEN
+        RAISE EXCEPTION 'Password must be at least 6 characters long';
+    END IF;
+
+    UPDATE auth.users
+    SET encrypted_password = crypt(p_new_password, gen_salt('bf', 10)),
+        updated_at = now()
+    WHERE id = p_auth_user_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'User account not found in Auth system';
+    END IF;
+
+    -- Audit log
+    BEGIN
+        INSERT INTO public.audit_log (user_id, role, action, description, metadata)
+        VALUES (
+            auth.uid(),
+            'ADMIN',
+            'PASSWORD_RESET',
+            'Administrator reset password for user ID ' || p_auth_user_id::text,
+            jsonb_build_object('target_user_id', p_auth_user_id)
+        );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+
+    RETURN jsonb_build_object('success', true, 'message', 'Password updated successfully');
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.admin_reset_user_password(UUID, TEXT) TO authenticated, service_role;
+

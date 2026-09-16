@@ -437,11 +437,9 @@ function showResetPasswordModal(authUserId, userName) {
     confirmBtn.textContent = "Updating...";
 
     try {
-      const { data, error } = await supabase.functions.invoke("admin-users", {
-        body: {
-          action: "reset_password",
-          payload: { authUserId, newPassword },
-        },
+      const { data, error } = await supabase.rpc("admin_reset_user_password", {
+        p_auth_user_id: authUserId,
+        p_new_password: newPassword,
       });
 
       if (error) throw error;
