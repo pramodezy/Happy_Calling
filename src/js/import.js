@@ -7,6 +7,7 @@ import { supabase, formatSupabaseError } from "./supabase.js";
 import { icons, escapeHtml, formatDate, formatDateTime } from "./utils.js";
 import { showToast } from "../components/toast.js";
 import { renderSpinner } from "../components/loading.js";
+import { openModal, closeModal } from "../components/modal.js";
 
 let parsedClosures = [];
 let fileMetadata = null;
@@ -638,6 +639,23 @@ async function executeBatchIngestion(records) {
   statusContainer.innerHTML = renderSpinner(`Ingesting ${records.length} records into Supabase PostgreSQL...`);
 
   try {
+    // 1. Initialize batch tracking entry for auditable revert capabilities
+    let batchId = null;
+    try {
+      const { data: bId, error: bErr } = await supabase.rpc("create_closure_import_batch", {
+        p_file_name: fileMetadata?.name || "Uploaded Closure Batch",
+        p_total_rows: records.length,
+        p_metadata: {
+          file_name: fileMetadata?.name,
+          size_bytes: fileMetadata?.sizeBytes,
+          total_rows: records.length,
+        },
+      });
+      if (!bErr && bId) batchId = bId;
+    } catch (bErr) {
+      console.warn("Batch creation notice:", bErr);
+    }
+
     // Ingest in chunks of 500 records to maintain optimal transaction size
     const CHUNK_SIZE = 500;
     let totalInserted = 0;
@@ -649,6 +667,7 @@ async function executeBatchIngestion(records) {
       const chunk = records.slice(i, i + CHUNK_SIZE);
       const { data, error } = await supabase.rpc("import_closures_batch", {
         p_closures: chunk,
+        p_batch_id: batchId,
       });
 
       if (error) throw error;
@@ -700,12 +719,17 @@ async function executeBatchIngestion(records) {
             : ""
         }
 
-        <div style="margin-top:1.25rem; display:flex; gap:0.75rem;">
+        <div style="margin-top:1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
           <a href="#/admin/closures" class="btn-primary">View in Closure Database</a>
+          <button type="button" id="btn-goto-import-history" class="btn-secondary">View Import History & Batches</button>
           <a href="#/admin" class="btn-secondary">Return to Admin Dashboard</a>
         </div>
       </div>
     `;
+
+    document.getElementById("btn-goto-import-history")?.addEventListener("click", () => {
+      document.getElementById("tab-btn-import-history")?.click();
+    });
   } catch (err) {
     console.error("executeBatchIngestion error:", err);
     statusContainer.innerHTML = `
@@ -778,28 +802,74 @@ function initGoogleSheetsEvents() {
 }
 
 /**
- * Load import history from audit_log table
+ * Load import history from closure_import_batches (with legacy audit_log fallback)
  */
 async function loadImportHistory() {
   const historyMount = document.getElementById("import-history-mount");
   if (!historyMount) return;
 
+  historyMount.innerHTML = renderSpinner("Loading past closure imports...");
+
   try {
-    const { data: logs, error } = await supabase
-      .from("audit_log")
+    const { data: batches, error } = await supabase
+      .from("closure_import_batches")
       .select("*")
-      .eq("action", "CLOSURE_IMPORT")
-      .order("timestamp", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(30);
 
-    if (error) throw error;
+    // Fallback to legacy audit_log if closure_import_batches is not populated yet or during migration
+    if (error || !batches || batches.length === 0) {
+      const { data: logs } = await supabase
+        .from("audit_log")
+        .select("*")
+        .eq("action", "CLOSURE_IMPORT")
+        .order("timestamp", { ascending: false })
+        .limit(30);
 
-    if (!logs || logs.length === 0) {
+      if (!logs || logs.length === 0) {
+        historyMount.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">${icons.upload}</div>
+            <h3>No Import History</h3>
+            <p>No closure batch uploads have been recorded yet.</p>
+          </div>
+        `;
+        return;
+      }
+
       historyMount.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-state-icon">${icons.upload}</div>
-          <h3>No Import History</h3>
-          <p>No closure batch uploads have been recorded yet.</p>
+        <div class="table-card">
+          <div class="table-card-header">
+            <h3 class="table-card-title">Recent Ingestion Batches</h3>
+          </div>
+          <div class="table-responsive-wrapper">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Date & Time</th>
+                  <th>Description</th>
+                  <th>Inserted</th>
+                  <th>Updated</th>
+                  <th>Rejected</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${logs
+                  .map(
+                    (log) => `
+                  <tr>
+                    <td>${formatDateTime(log.timestamp)}</td>
+                    <td>${escapeHtml(log.description)}</td>
+                    <td><span class="badge badge-success">${log.metadata?.inserted || 0}</span></td>
+                    <td><span class="badge badge-info">${log.metadata?.updated || 0}</span></td>
+                    <td><span class="badge ${log.metadata?.rejected > 0 ? "badge-danger" : "badge-neutral"}">${log.metadata?.rejected || 0}</span></td>
+                  </tr>
+                `
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
         </div>
       `;
       return;
@@ -807,39 +877,92 @@ async function loadImportHistory() {
 
     historyMount.innerHTML = `
       <div class="table-card">
-        <div class="table-card-header">
-          <h3 class="table-card-title">Recent Ingestion Batches</h3>
+        <div class="table-card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+          <div>
+            <h3 class="table-card-title">Recent Ingestion Batches</h3>
+            <p style="font-size:0.8125rem; color:var(--text-secondary); margin-top:2px;">
+              Track batch uploads and safely revert accidental uploads with calling protection.
+            </p>
+          </div>
+          <button type="button" id="btn-refresh-import-history" class="btn-secondary" style="padding:6px 12px; font-size:0.75rem; display:flex; align-items:center; gap:4px;">
+            <span style="width:14px; height:14px;">${icons.refreshCw}</span>
+            <span>Refresh</span>
+          </button>
         </div>
         <div class="table-responsive-wrapper">
           <table class="data-table">
             <thead>
               <tr>
                 <th>Date & Time</th>
-                <th>Description</th>
+                <th>File / Source</th>
+                <th>Total Rows</th>
                 <th>Inserted</th>
                 <th>Updated</th>
-                <th>Rejected</th>
+                <th>Status</th>
+                <th style="text-align:right;">Actions</th>
               </tr>
             </thead>
             <tbody>
-              ${logs
-                .map(
-                  (log) => `
-                <tr>
-                  <td>${formatDateTime(log.timestamp)}</td>
-                  <td>${escapeHtml(log.description)}</td>
-                  <td><span class="badge badge-success">${log.metadata?.inserted || 0}</span></td>
-                  <td><span class="badge badge-info">${log.metadata?.updated || 0}</span></td>
-                  <td><span class="badge ${log.metadata?.rejected > 0 ? "badge-danger" : "badge-neutral"}">${log.metadata?.rejected || 0}</span></td>
-                </tr>
-              `
-                )
+              ${batches
+                .map((b) => {
+                  const isReverted = b.status === "REVERTED";
+                  const isProcessing = b.status === "PROCESSING";
+
+                  let statusBadge = `<span class="badge badge-success"><span class="badge-dot"></span>Active</span>`;
+                  if (isReverted) {
+                    statusBadge = `<span class="badge badge-danger" title="Reverted on ${formatDateTime(b.reverted_at)}"><span class="badge-dot"></span>Reverted</span>`;
+                  } else if (isProcessing) {
+                    statusBadge = `<span class="badge badge-warning"><span class="badge-dot"></span>Processing</span>`;
+                  }
+
+                  let actionBtn = "";
+                  if (isReverted) {
+                    actionBtn = `
+                      <span style="font-size:0.75rem; color:var(--text-tertiary);" title="Reverted on ${formatDateTime(b.reverted_at)}">
+                        ${b.reverted_count || 0} removed
+                      </span>
+                    `;
+                  } else {
+                    actionBtn = `
+                      <button type="button" class="btn-secondary btn-revert-batch" data-id="${b.id}" data-name="${escapeHtml(b.file_name)}" style="padding:4px 10px; font-size:0.75rem; color:var(--status-danger-dot); border-color:rgba(239, 68, 68, 0.4); display:inline-flex; align-items:center; gap:4px;">
+                        <span style="width:14px; height:14px;">${icons.rotateCcw}</span>
+                        <span>Revert Batch</span>
+                      </button>
+                    `;
+                  }
+
+                  return `
+                    <tr style="${isReverted ? "opacity:0.65; background:var(--bg-surface-subtle);" : ""}">
+                      <td>${formatDateTime(b.created_at)}</td>
+                      <td>
+                        <strong style="color:var(--text-primary); font-size:0.875rem;">${escapeHtml(b.file_name)}</strong>
+                      </td>
+                      <td>${b.total_rows || (b.inserted_count + b.updated_count + b.rejected_count)}</td>
+                      <td><span class="badge badge-success">${b.inserted_count || 0}</span></td>
+                      <td><span class="badge badge-info">${b.updated_count || 0}</span></td>
+                      <td>${statusBadge}</td>
+                      <td style="text-align:right;">${actionBtn}</td>
+                    </tr>
+                  `;
+                })
                 .join("")}
             </tbody>
           </table>
         </div>
       </div>
     `;
+
+    document.getElementById("btn-refresh-import-history")?.addEventListener("click", () => {
+      loadImportHistory();
+    });
+
+    historyMount.querySelectorAll(".btn-revert-batch").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const batchId = btn.getAttribute("data-id");
+        const batchName = btn.getAttribute("data-name");
+        openRevertBatchModal(batchId, batchName);
+      });
+    });
   } catch (err) {
     console.error("loadImportHistory error:", err);
     historyMount.innerHTML = `
@@ -847,5 +970,147 @@ async function loadImportHistory() {
         <strong>Error loading history:</strong> ${formatSupabaseError(err)}
       </div>
     `;
+  }
+}
+
+/**
+ * Modal dialog for inspecting and safely executing batch revert
+ */
+async function openRevertBatchModal(batchId, batchName) {
+  // Pre-flight inspection modal
+  openModal({
+    title: `Revert Batch Inspection`,
+    contentHtml: `
+      <div style="padding:1.5rem 0; text-align:center;">
+        ${renderSpinner("Checking batch status and scanning calling activity...")}
+      </div>
+    `,
+    footerHtml: `<button type="button" class="btn-secondary" id="btn-modal-cancel">Cancel</button>`,
+    size: "normal",
+  });
+
+  document.getElementById("btn-modal-cancel")?.addEventListener("click", closeModal);
+
+  try {
+    const { data: status, error } = await supabase.rpc("check_closure_batch_status", {
+      p_batch_id: batchId,
+    });
+
+    if (error) throw error;
+
+    const totalInMaster = status.total_current_in_master || 0;
+    const calledCount = status.called_count || 0;
+    const safeToDelete = status.safe_to_delete_count || 0;
+
+    let warningNotice = "";
+    if (calledCount > 0) {
+      warningNotice = `
+        <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:0.875rem; margin-top:1rem; color:#92400e; font-size:0.8125rem; display:flex; gap:0.5rem; align-items:flex-start;">
+          <span style="width:20px; height:20px; flex-shrink:0;">${icons.alertTriangle}</span>
+          <div>
+            <strong>Safety Protection Active:</strong>
+            <p style="margin:4px 0 0 0;">
+              <strong>${calledCount} closure(s)</strong> in this batch have already been called by CCI agents. To protect customer feedback, ratings, and audit compliance, <strong>these records will NOT be deleted</strong>.
+            </p>
+            <p style="margin:4px 0 0 0;">
+              Only the <strong>${safeToDelete} uncalled closure(s)</strong> will be deleted from the database.
+            </p>
+          </div>
+        </div>
+      `;
+    } else {
+      warningNotice = `
+        <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:0.875rem; margin-top:1rem; color:#991b1b; font-size:0.8125rem; display:flex; gap:0.5rem; align-items:flex-start;">
+          <span style="width:20px; height:20px; flex-shrink:0;">${icons.alertTriangle}</span>
+          <div>
+            <strong>Permanent Deletion:</strong>
+            <p style="margin:4px 0 0 0;">
+              None of the closures in this batch have been called yet. All <strong>${safeToDelete} closure(s)</strong> will be permanently removed from the master database.
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
+    const modalBody = `
+      <div style="display:flex; flex-direction:column; gap:1rem;">
+        <p style="font-size:0.875rem; color:var(--text-secondary);">
+          You are about to revert the ingestion batch: <strong style="color:var(--text-primary);">${escapeHtml(batchName)}</strong>.
+        </p>
+
+        <div class="kpi-grid" style="grid-template-columns:repeat(3, 1fr); margin-top:0.25rem;">
+          <div class="kpi-card" style="padding:0.75rem;">
+            <span class="kpi-card-title">In Database</span>
+            <span class="kpi-card-value" style="font-size:1.25rem;">${totalInMaster}</span>
+          </div>
+          <div class="kpi-card" style="padding:0.75rem;">
+            <span class="kpi-card-title">Will Be Deleted</span>
+            <span class="kpi-card-value" style="font-size:1.25rem; color:var(--status-danger-dot);">${safeToDelete}</span>
+          </div>
+          <div class="kpi-card" style="padding:0.75rem;">
+            <span class="kpi-card-title">Called (Preserved)</span>
+            <span class="kpi-card-value" style="font-size:1.25rem; color:var(--status-success-dot);">${calledCount}</span>
+          </div>
+        </div>
+
+        ${warningNotice}
+
+        <div style="font-size:0.75rem; color:var(--text-tertiary); margin-top:0.5rem;">
+          Batch ID: <code style="background:var(--bg-surface-subtle); padding:2px 4px; border-radius:4px;">${batchId}</code>
+        </div>
+      </div>
+    `;
+
+    closeModal();
+
+    openModal({
+      title: `Confirm Revert: ${escapeHtml(batchName)}`,
+      contentHtml: modalBody,
+      footerHtml: `
+        <div style="display:flex; justify-content:flex-end; gap:0.75rem; width:100%;">
+          <button type="button" class="btn-secondary" id="btn-cancel-revert">Cancel</button>
+          <button type="button" class="btn-primary" id="btn-execute-revert-confirm" style="background:var(--status-danger-dot); border-color:var(--status-danger-dot);" ${safeToDelete === 0 && totalInMaster === 0 ? "disabled" : ""}>
+            <span style="width:16px; height:16px;">${icons.rotateCcw}</span>
+            <span>Confirm Revert (${safeToDelete} Records)</span>
+          </button>
+        </div>
+      `,
+      size: "normal",
+    });
+
+    document.getElementById("btn-cancel-revert")?.addEventListener("click", closeModal);
+    document.getElementById("btn-execute-revert-confirm")?.addEventListener("click", async () => {
+      const confirmBtn = document.getElementById("btn-execute-revert-confirm");
+      if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = `<span>Reverting records...</span>`;
+      }
+
+      try {
+        const { data: revResult, error: revErr } = await supabase.rpc("revert_closure_batch", {
+          p_batch_id: batchId,
+        });
+
+        if (revErr) throw revErr;
+
+        closeModal();
+        showToast(
+          `Batch reverted! ${revResult?.deleted_count || 0} uncalled closures deleted, ${revResult?.protected_count || 0} preserved.`,
+          "success"
+        );
+        loadImportHistory();
+      } catch (e) {
+        console.error("Revert error:", e);
+        showToast(`Failed to revert batch: ${formatSupabaseError(e)}`, "error");
+        if (confirmBtn) {
+          confirmBtn.disabled = false;
+          confirmBtn.innerHTML = `<span>Retry Revert</span>`;
+        }
+      }
+    });
+  } catch (err) {
+    closeModal();
+    console.error("check_closure_batch_status error:", err);
+    showToast(`Failed to inspect batch: ${formatSupabaseError(err)}`, "error");
   }
 }

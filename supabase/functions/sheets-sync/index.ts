@@ -140,14 +140,28 @@ serve(async (req) => {
       });
     }
 
+    // Initialize import batch
+    let batchId = null;
+    try {
+      const { data: bId } = await adminClient.rpc("create_closure_import_batch", {
+        p_file_name: `Google Sheets: ${sheetId.substring(0, 15)}...`,
+        p_total_rows: closures.length,
+        p_metadata: { source: "google-sheets", sheetId, range },
+      });
+      batchId = bId;
+    } catch (bErr) {
+      console.warn("Could not create import batch tracking entry:", bErr);
+    }
+
     // Call stored procedure
     const { data: importResult, error: importError } = await adminClient.rpc("import_closures_batch", {
       p_closures: closures,
+      p_batch_id: batchId,
     });
 
     if (importError) throw importError;
 
-    return new Response(JSON.stringify({ success: true, result: importResult }), {
+    return new Response(JSON.stringify({ success: true, result: importResult, batch_id: batchId }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
