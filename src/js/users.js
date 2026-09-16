@@ -176,7 +176,7 @@ export async function loadUsersTable() {
               <div style="display:inline-flex; gap:0.35rem;">
                 ${
                   u.role === "BSM"
-                    ? `<button type="button" class="btn-secondary btn-edit-regions" data-id="${u.id}" data-name="${escapeHtml(u.user_name)}" data-regions='${JSON.stringify(u.assigned_regions || [])}' style="padding:4px 8px; font-size:0.75rem; color:var(--moto-blue-accent); font-weight:600;">
+                    ? `<button type="button" class="btn-secondary btn-edit-regions" data-id="${u.id}" data-name="${escapeHtml(u.user_name)}" data-regions="${escapeHtml(JSON.stringify(u.assigned_regions || []))}" style="padding:4px 8px; font-size:0.75rem; color:var(--moto-blue-accent); font-weight:600;">
                         Edit Regions
                       </button>`
                     : ""
@@ -580,29 +580,29 @@ async function showEditRegionsModal(userId, userName, currentRegions) {
     </div>
   `;
 
-  const modal = openModal({
+  const overlay = openModal({
     title: `Edit Assigned Regions: ${escapeHtml(userName)}`,
-    content: modalBody,
+    contentHtml: modalBody,
+    size: "normal",
   });
 
-  const modalEl = document.getElementById(modal.id);
-  if (!modalEl) return;
+  if (!overlay) return;
 
-  modalEl.querySelector("#btn-edit-select-all")?.addEventListener("click", () => {
-    modalEl.querySelectorAll('input[name="edit-bsm-region-chk"]').forEach((chk) => (chk.checked = true));
+  overlay.querySelector("#btn-edit-select-all")?.addEventListener("click", () => {
+    overlay.querySelectorAll('input[name="edit-bsm-region-chk"]').forEach((chk) => (chk.checked = true));
   });
 
-  modalEl.querySelector("#btn-edit-clear-all")?.addEventListener("click", () => {
-    modalEl.querySelectorAll('input[name="edit-bsm-region-chk"]').forEach((chk) => (chk.checked = false));
+  overlay.querySelector("#btn-edit-clear-all")?.addEventListener("click", () => {
+    overlay.querySelectorAll('input[name="edit-bsm-region-chk"]').forEach((chk) => (chk.checked = false));
   });
 
-  modalEl.querySelector("#btn-cancel-edit-regions")?.addEventListener("click", () => {
-    modal.close();
+  overlay.querySelector("#btn-cancel-edit-regions")?.addEventListener("click", () => {
+    closeModal();
   });
 
-  modalEl.querySelector("#btn-save-edit-regions")?.addEventListener("click", async () => {
-    const saveBtn = modalEl.querySelector("#btn-save-edit-regions");
-    const selected = Array.from(modalEl.querySelectorAll('input[name="edit-bsm-region-chk"]:checked')).map(
+  overlay.querySelector("#btn-save-edit-regions")?.addEventListener("click", async () => {
+    const saveBtn = overlay.querySelector("#btn-save-edit-regions");
+    const selected = Array.from(overlay.querySelectorAll('input[name="edit-bsm-region-chk"]:checked')).map(
       (chk) => chk.value
     );
 
@@ -635,7 +635,7 @@ async function showEditRegionsModal(userId, userName, currentRegions) {
       }
 
       showToast(`Updated assigned regions for ${userName} to: ${selected.join(", ")}`, "success");
-      modal.close();
+      closeModal();
       loadUsersTable();
     } catch (err) {
       showToast(`Failed to update regions: ${formatSupabaseError(err)}`, "error");
