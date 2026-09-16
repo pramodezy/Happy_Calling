@@ -3,11 +3,12 @@
 // ============================================================================
 
 import { icons, escapeHtml } from "../js/utils.js";
-import { getCurrentProfile, isAdmin, logoutUser } from "../js/auth.js";
+import { getCurrentProfile, isAdmin, isBSM, hasAdminOrBsmAccess, logoutUser } from "../js/auth.js";
 import { getActiveWorkspace } from "../js/workspace.js";
 
 export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0) {
   const admin = isAdmin();
+  const bsm = isBSM();
   const profile = getCurrentProfile() || {};
   const workspace = getActiveWorkspace();
 
@@ -18,6 +19,17 @@ export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0
     { path: "#/pending", label: "Pending Calls", icon: icons.clock, count: pendingBadgeCount },
     { path: "#/completed", label: "Completed Calls", icon: icons.checkCircle },
     { path: "#/performance", label: "My Performance", icon: icons.award },
+    { path: "#/profile", label: "My Profile", icon: icons.user },
+  ];
+
+  const happyBsmNav = [
+    { section: "Regional Analytics" },
+    { path: "#/admin", label: "Regional Dashboard", icon: icons.dashboard },
+    { path: "#/admin/performance", label: "Regional Performance", icon: icons.award },
+    { path: "#/admin/ageing", label: "Regional Ageing", icon: icons.clock },
+    { path: "#/admin/feedback", label: "Customer Feedback", icon: icons.smile },
+    { section: "Regional Records" },
+    { path: "#/admin/closures", label: "Regional Closures", icon: icons.database },
     { path: "#/profile", label: "My Profile", icon: icons.user },
   ];
 
@@ -48,6 +60,16 @@ export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0
     { path: "#/profile", label: "My Profile", icon: icons.user },
   ];
 
+  const intimationBsmNav = [
+    { section: "Intimation Analytics" },
+    { path: "#/intimation/admin", label: "Regional Intimation", icon: icons.dashboard },
+    { path: "#/intimation/dashboard", label: "Intimation Overview", icon: icons.smile },
+    { path: "#/intimation/performance", label: "Regional Performance", icon: icons.award },
+    { path: "#/intimation/pending", label: "Open Calls Backlog", icon: icons.clock },
+    { path: "#/intimation/history", label: "Intimation History", icon: icons.fileText },
+    { path: "#/profile", label: "My Profile", icon: icons.user },
+  ];
+
   const intimationAdminNav = [
     { section: "Intimation Analytics" },
     { path: "#/intimation/admin", label: "Intimation Admin", icon: icons.dashboard },
@@ -67,9 +89,9 @@ export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0
 
   let items;
   if (workspace === "intimation") {
-    items = admin ? intimationAdminNav : intimationCciNav;
+    items = admin ? intimationAdminNav : (bsm ? intimationBsmNav : intimationCciNav);
   } else {
-    items = admin ? happyAdminNav : happyCciNav;
+    items = admin ? happyAdminNav : (bsm ? happyBsmNav : happyCciNav);
   }
 
   let menuHtml = "";
@@ -98,8 +120,17 @@ export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0
   });
 
   const logoHref = workspace === "intimation"
-    ? (admin ? "#/intimation/admin" : "#/intimation/dashboard")
-    : (admin ? "#/admin" : "#/dashboard");
+    ? (hasAdminOrBsmAccess() ? "#/intimation/admin" : "#/intimation/dashboard")
+    : (hasAdminOrBsmAccess() ? "#/admin" : "#/dashboard");
+
+  let userRoleLabel = escapeHtml(profile.cci_code || "CCI Portal");
+  if (admin) {
+    userRoleLabel = "Enterprise Admin";
+  } else if (bsm) {
+    userRoleLabel = profile.assigned_regions && profile.assigned_regions.length > 0
+      ? `BSM: ${profile.assigned_regions.join(", ")}`
+      : "Regional Manager";
+  }
 
   return `
     <div class="sidebar-backdrop"></div>
@@ -109,7 +140,7 @@ export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0
           <div class="logo-icon-wrap">M</div>
           <div class="logo-text-wrap">
             <span class="logo-title">Motorola Care</span>
-            <span class="logo-sub">${admin ? "Enterprise Admin" : escapeHtml(profile.cci_code || "CCI Portal")}</span>
+            <span class="logo-sub">${userRoleLabel}</span>
           </div>
         </a>
       </div>

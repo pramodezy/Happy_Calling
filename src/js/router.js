@@ -2,7 +2,7 @@
 // Client-Side Hash Router with Role-Based Route Guarding
 // ============================================================================
 
-import { getCurrentProfile, isAdmin, isCCIUser, logoutUser, initializeAuth } from "./auth.js";
+import { getCurrentProfile, isAdmin, isBSM, hasAdminOrBsmAccess, isCCIUser, logoutUser, initializeAuth } from "./auth.js";
 import { isSupabaseConfigured } from "./supabase.js";
 import { renderSidebar, renderMobileBottomNav, initSidebarEvents } from "../components/sidebar.js";
 import { renderNavbar, initNavbarEvents } from "../components/navbar.js";
@@ -23,19 +23,22 @@ import { renderAuditPage } from "./audit.js";
 import { renderIntimationCallingPage } from "./intimation-calling.js";
 import { renderIntimationPendingPage } from "./intimation-pending.js";
 import { renderIntimationHistoryPage } from "./intimation-history.js";
-import { renderIntimationImportPage } from "./intimation-import.js";
-import { renderIntimationDashboardPage } from "./intimation-dashboard.js";
 import { renderIntimationPerformancePage } from "./intimation-performance.js";
+import { renderIntimationImportPage } from "./intimation-import.js";
 import { renderAdminIntimationPage } from "./admin-intimation.js";
+import { renderIntimationDashboardPage } from "./intimation-dashboard.js";
+import { showToast } from "../components/toast.js";
 import { getActiveWorkspace } from "./workspace.js";
 import { escapeHtml, formatDateTime, icons } from "./utils.js";
-import { showToast } from "../components/toast.js";
 
 /**
- * Route Handlers Map
+ * Route Configuration
  */
 const routes = {
+  // Public Routes
   "#/login": { render: renderLoginPage, isPublic: true },
+
+  // Authenticated Standard Routes (CCI Users)
   "#/dashboard": { render: renderDashboardPage, requiresAuth: true },
   "#/happy-calling": { render: renderHappyCallingPage, requiresAuth: true },
   "#/pending": { render: renderPendingPage, requiresAuth: true },
@@ -43,14 +46,14 @@ const routes = {
   "#/performance": { render: renderPerformancePage, requiresAuth: true },
   "#/profile": { render: renderProfilePage, requiresAuth: true },
 
-  // Admin Routes (Analytics & Monitoring)
-  "#/admin": { render: renderAdminDashboard, requiresAuth: true, adminOnly: true },
-  "#/admin/performance": { render: renderAdminPerformancePage, requiresAuth: true, adminOnly: true },
-  "#/admin/ageing": { render: renderAdminAgeingPage, requiresAuth: true, adminOnly: true },
-  "#/admin/feedback": { render: renderAdminFeedbackPage, requiresAuth: true, adminOnly: true },
-  "#/admin/closures": { render: renderClosuresPage, requiresAuth: true, adminOnly: true },
+  // Admin & Regional Manager (BSM) Routes
+  "#/admin": { render: renderAdminDashboard, requiresAuth: true, adminOrBsm: true },
+  "#/admin/performance": { render: renderAdminPerformancePage, requiresAuth: true, adminOrBsm: true },
+  "#/admin/ageing": { render: renderAdminAgeingPage, requiresAuth: true, adminOrBsm: true },
+  "#/admin/feedback": { render: renderAdminFeedbackPage, requiresAuth: true, adminOrBsm: true },
+  "#/admin/closures": { render: renderClosuresPage, requiresAuth: true, adminOrBsm: true },
   "#/admin/import": { render: renderImportPage, requiresAuth: true, adminOnly: true },
-  "#/admin/happy-calling": { render: renderHappyCallingPage, requiresAuth: true, adminOnly: true },
+  "#/admin/happy-calling": { render: renderHappyCallingPage, requiresAuth: true, adminOrBsm: true },
   "#/admin/users": { render: renderUsersPage, requiresAuth: true, adminOnly: true },
   "#/admin/cci": { render: renderCciPage, requiresAuth: true, adminOnly: true },
   "#/admin/audit": { render: renderAuditPage, requiresAuth: true, adminOnly: true },
@@ -87,9 +90,9 @@ export async function handleRouteChange() {
     const profile = getCurrentProfile();
     const ws = getActiveWorkspace();
     if (ws === "intimation") {
-      hash = profile ? (profile.role === "ADMIN" ? "#/intimation/admin" : "#/intimation/dashboard") : "#/login";
+      hash = profile ? (hasAdminOrBsmAccess() ? "#/intimation/admin" : "#/intimation/dashboard") : "#/login";
     } else {
-      hash = profile ? (profile.role === "ADMIN" ? "#/admin" : "#/dashboard") : "#/login";
+      hash = profile ? (hasAdminOrBsmAccess() ? "#/admin" : "#/dashboard") : "#/login";
     }
     window.location.hash = hash;
     return;
@@ -110,13 +113,20 @@ export async function handleRouteChange() {
 
   // Guard: If authenticated and trying to access login -> redirect to home
   if (route.isPublic && profile) {
-    window.location.hash = isAdmin() ? "#/admin" : "#/dashboard";
+    window.location.hash = hasAdminOrBsmAccess() ? "#/admin" : "#/dashboard";
     return;
   }
 
   // Guard: Admin-only route guard
   if (route.adminOnly && !isAdmin()) {
-    showToast("Unauthorized access. Admin privileges required.", "error");
+    showToast("Unauthorized access. Super Administrator privileges required.", "error");
+    window.location.hash = hasAdminOrBsmAccess() ? "#/admin" : "#/dashboard";
+    return;
+  }
+
+  // Guard: Admin or Regional Manager (BSM) route guard
+  if (route.adminOrBsm && !hasAdminOrBsmAccess()) {
+    showToast("Unauthorized access. Regional Manager or Admin privileges required.", "error");
     window.location.hash = "#/dashboard";
     return;
   }
@@ -275,22 +285,39 @@ function renderProfilePage(container) {
           </div>
           <div>
             <h3 style="font-size:1.15rem; font-weight:700;">${escapeHtml(profile.user_name || "User")}</h3>
-            <span class="badge ${profile.role === "ADMIN" ? "badge-info" : "badge-neutral"}">
-              ${profile.role === "ADMIN" ? "Enterprise Administrator" : "CCI Partner Agent"}
+            <span class="badge ${profile.role === "ADMIN" ? "badge-info" : profile.role === "BSM" ? "badge-warning" : "badge-neutral"}">
+              ${profile.role === "ADMIN" ? "Enterprise Administrator" : profile.role === "BSM" ? "Regional Manager (BSM)" : "CCI Partner Agent"}
             </span>
           </div>
         </div>
 
         <div class="customer-meta-grid">
-          <div class="customer-meta-item">
-            <span class="meta-label">Assigned CCI Code</span>
-            <span class="meta-value" style="font-family:monospace; color:var(--moto-blue-accent);">${escapeHtml(profile.cci_code || "National HQ")}</span>
-          </div>
+          ${
+            profile.role === "BSM"
+              ? `
+            <div class="customer-meta-item" style="grid-column: 1 / -1;">
+              <span class="meta-label">Assigned Operating Regions</span>
+              <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;">
+                ${
+                  Array.isArray(profile.assigned_regions) && profile.assigned_regions.length > 0
+                    ? profile.assigned_regions.map(r => `<span class="badge badge-info" style="font-size:0.75rem; padding:2px 8px;">${escapeHtml(r)}</span>`).join("")
+                    : `<span style="color:var(--text-tertiary); font-style:italic;">No regions assigned</span>`
+                }
+              </div>
+            </div>
+          `
+              : `
+            <div class="customer-meta-item">
+              <span class="meta-label">Assigned CCI Code</span>
+              <span class="meta-value" style="font-family:monospace; color:var(--moto-blue-accent);">${escapeHtml(profile.cci_code || "National HQ")}</span>
+            </div>
 
-          <div class="customer-meta-item">
-            <span class="meta-label">CCI Location Name</span>
-            <span class="meta-value">${escapeHtml(profile.cci_name || "Enterprise All")}</span>
-          </div>
+            <div class="customer-meta-item">
+              <span class="meta-label">CCI Location Name</span>
+              <span class="meta-value">${escapeHtml(profile.cci_name || "Enterprise All")}</span>
+            </div>
+          `
+          }
 
           <div class="customer-meta-item">
             <span class="meta-label">Account Status</span>

@@ -248,6 +248,27 @@ export function isAdmin() {
 }
 
 /**
+ * Check if current user is a Regional Manager (BSM)
+ */
+export function isBSM() {
+  return currentUserProfile && currentUserProfile.role === "BSM";
+}
+
+/**
+ * Check if current user has executive dashboard privileges (Admin or BSM)
+ */
+export function hasAdminOrBsmAccess() {
+  return currentUserProfile && (currentUserProfile.role === "ADMIN" || currentUserProfile.role === "BSM");
+}
+
+/**
+ * Get assigned regions for current user (array of region names)
+ */
+export function getUserAssignedRegions() {
+  return (currentUserProfile && currentUserProfile.assigned_regions) || [];
+}
+
+/**
  * Check if current user is a CCI User
  */
 export function isCCIUser() {

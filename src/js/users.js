@@ -150,15 +150,19 @@ export async function loadUsersTable() {
               <strong style="color:var(--text-primary); font-size:0.9rem;">${escapeHtml(u.user_name)}</strong>
             </td>
             <td>
-              <span class="badge ${u.role === "ADMIN" ? "badge-info" : "badge-neutral"}">
-                ${u.role === "ADMIN" ? "Company Admin" : "CCI Agent"}
+              <span class="badge ${u.role === "ADMIN" ? "badge-info" : (u.role === "BSM" ? "badge-warning" : "badge-neutral")}">
+                ${u.role === "ADMIN" ? "Company Admin" : (u.role === "BSM" ? "Regional BSM" : "CCI Agent")}
               </span>
             </td>
             <td>
               ${
-                u.cci_code
-                  ? `<div><strong style="font-family:monospace; color:var(--moto-blue-accent);">${escapeHtml(u.cci_code)}</strong></div><div style="font-size:0.75rem; color:var(--text-secondary);">${escapeHtml(u.cci_name || "")}</div>`
-                  : `<span style="color:var(--text-tertiary);">Company HQ (All)</span>`
+                u.role === "BSM"
+                  ? (u.assigned_regions && u.assigned_regions.length > 0
+                      ? u.assigned_regions.map((r) => `<span class="badge badge-info" style="font-size:0.7rem; margin-right:3px; padding:2px 6px;">${escapeHtml(r)}</span>`).join("")
+                      : `<span style="color:var(--text-danger);">No Regions</span>`)
+                  : (u.cci_code
+                      ? `<div><strong style="font-family:monospace; color:var(--moto-blue-accent);">${escapeHtml(u.cci_code)}</strong></div><div style="font-size:0.75rem; color:var(--text-secondary);">${escapeHtml(u.cci_name || "")}</div>`
+                      : `<span style="color:var(--text-tertiary);">Company HQ (All)</span>`)
               }
             </td>
             <td>
@@ -277,10 +281,21 @@ function attachUserActions(mount, totalRecords) {
   });
 }
 
-function showCreateUserModal() {
+async function showCreateUserModal() {
   const cciOptions = availableCcis
     .map((c) => `<option value="${c.cci_code}" data-name="${escapeHtml(c.cci_name)}">${c.cci_code} - ${escapeHtml(c.cci_name)}</option>`)
     .join("");
+
+  // Dynamically load active regions from cci_master
+  let availableRegions = [];
+  try {
+    const { data: cciList } = await supabase.from("cci_master").select("region");
+    if (cciList) {
+      availableRegions = Array.from(new Set(cciList.map((c) => (c.region || "").trim()).filter(Boolean))).sort();
+    }
+  } catch (e) {
+    console.warn("Region load error:", e);
+  }
 
   const contentHtml = `
     <form id="create-user-form">
@@ -296,14 +311,15 @@ function showCreateUserModal() {
 
       <div class="form-group">
         <label for="new-user-password" class="form-label">Temporary Password *</label>
-        <input type="password" id="new-user-password" class="form-input" required minlength="6" placeholder="Min 6 characters">
+        <input type="password" id="new-user-password" class="form-input" required minlength="6" placeholder="Min 6 characters" value="Moto@123">
       </div>
 
       <div class="form-group">
         <label for="new-user-role" class="form-label">Role *</label>
         <select id="new-user-role" class="form-select" required>
-          <option value="CCI_USER" selected>CCI User (Restricted to assigned CCI)</option>
-          <option value="ADMIN">ADMIN (Full access to all CCIs and Settings)</option>
+          <option value="CCI_USER" selected>CCI User (Restricted to assigned single CCI)</option>
+          <option value="BSM">BSM / Regional Manager (Multi-Region Scoped Access)</option>
+          <option value="ADMIN">ADMIN (Full company-wide access)</option>
         </select>
       </div>
 
@@ -313,6 +329,29 @@ function showCreateUserModal() {
           <option value="">Select CCI...</option>
           ${cciOptions}
         </select>
+      </div>
+
+      <div class="form-group" id="group-assign-regions" style="display:none;">
+        <label class="form-label">Assign Operational Regions (BSM) *</label>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:0.5rem; background:var(--bg-surface-subtle); padding:0.75rem; border-radius:6px; border:1px solid var(--border-subtle); max-height:160px; overflow-y:auto;">
+          ${
+            availableRegions.length > 0
+              ? availableRegions
+                  .map(
+                    (reg) => `
+                <label style="display:flex; align-items:center; gap:6px; font-size:0.8125rem; cursor:pointer;">
+                  <input type="checkbox" name="bsm-region-cb" value="${escapeHtml(reg)}" style="cursor:pointer;">
+                  <span>${escapeHtml(reg)}</span>
+                </label>
+              `
+                  )
+                  .join("")
+              : `<span style="font-size:0.75rem; color:var(--text-tertiary);">No regions found in cci_master</span>`
+          }
+        </div>
+        <span style="font-size:0.75rem; color:var(--text-tertiary); display:block; margin-top:4px;">
+          Select one or more regional clusters (e.g. North-1 & North-2, or South-1, South-2 & South-3)
+        </span>
       </div>
     </form>
   `;
@@ -331,10 +370,12 @@ function showCreateUserModal() {
 
   const roleSelect = overlay.querySelector("#new-user-role");
   const cciGroup = overlay.querySelector("#group-assign-cci");
+  const regionsGroup = overlay.querySelector("#group-assign-regions");
+
   roleSelect?.addEventListener("change", (e) => {
-    if (cciGroup) {
-      cciGroup.style.display = e.target.value === "CCI_USER" ? "block" : "none";
-    }
+    const val = e.target.value;
+    if (cciGroup) cciGroup.style.display = val === "CCI_USER" ? "block" : "none";
+    if (regionsGroup) regionsGroup.style.display = val === "BSM" ? "block" : "none";
   });
 
   overlay.querySelector("#modal-btn-cancel")?.addEventListener("click", closeModal);
@@ -346,7 +387,6 @@ function showCreateUserModal() {
     const role = roleSelect?.value;
     const cciSelect = overlay.querySelector("#new-user-cci");
     const cciCode = cciSelect?.value;
-    const cciName = cciSelect?.selectedOptions[0]?.getAttribute("data-name") || "";
 
     if (!userName || !email || !password || !role) {
       showToast("Please fill in all required fields.", "warning");
@@ -358,21 +398,32 @@ function showCreateUserModal() {
       return;
     }
 
+    let selectedRegions = [];
+    if (role === "BSM") {
+      selectedRegions = Array.from(overlay.querySelectorAll("input[name='bsm-region-cb']:checked")).map((cb) => cb.value);
+      if (selectedRegions.length === 0) {
+        showToast("Please select at least one region for the BSM account.", "warning");
+        return;
+      }
+    }
+
     const saveBtn = overlay.querySelector("#modal-btn-save-user");
     saveBtn.disabled = true;
     saveBtn.textContent = "Creating...";
 
     try {
-      const { data, error } = await supabase.functions.invoke("admin-users", {
-        body: {
-          action: "create_user",
-          payload: { email, password, userName, role, cciCode, cciName },
-        },
+      const { data, error } = await supabase.rpc("admin_create_system_user", {
+        p_email: email,
+        p_password: password,
+        p_user_name: userName,
+        p_role: role,
+        p_cci_code: role === "CCI_USER" ? cciCode : null,
+        p_assigned_regions: role === "BSM" ? selectedRegions : [],
       });
 
       if (error) throw error;
 
-      showToast(`User ${email} created successfully!`, "success");
+      showToast(`User ${email} created successfully with role ${role}!`, "success");
       closeModal();
       loadUsersTable();
     } catch (err) {
