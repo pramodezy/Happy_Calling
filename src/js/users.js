@@ -170,6 +170,9 @@ export async function loadUsersTable() {
             <td><span style="font-size:0.8125rem;">${formatDateTime(u.created_at)}</span></td>
             <td style="text-align:right;">
               <div style="display:inline-flex; gap:0.35rem;">
+                <button type="button" class="btn-secondary btn-reset-pw" data-auth="${u.auth_user_id}" data-name="${escapeHtml(u.user_name)}" style="padding:4px 8px; font-size:0.75rem;">
+                  Reset PW
+                </button>
                 <button type="button" class="btn-secondary btn-toggle-status" data-id="${u.id}" data-auth="${u.auth_user_id}" data-status="${u.status}" style="padding:4px 8px; font-size:0.75rem;">
                   ${isAct ? "Deactivate" : "Activate"}
                 </button>
@@ -238,6 +241,19 @@ function attachUserActions(mount, totalRecords) {
       }, 300)
     );
   }
+
+  // Reset user password
+  mount.querySelectorAll(".btn-reset-pw").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const authUserId = btn.getAttribute("data-auth");
+      const userName = btn.getAttribute("data-name");
+      if (!authUserId || authUserId === "null" || authUserId === "undefined") {
+        showToast("No Auth User ID linked to this profile. Please recreate or check Supabase Auth.", "warning");
+        return;
+      }
+      showResetPasswordModal(authUserId, userName);
+    });
+  });
 
   // Toggle user status (Activate / Deactivate)
   mount.querySelectorAll(".btn-toggle-status").forEach((btn) => {
@@ -367,3 +383,77 @@ function showCreateUserModal() {
     }
   });
 }
+
+function showResetPasswordModal(authUserId, userName) {
+  const contentHtml = `
+    <form id="form-reset-password" style="display:flex; flex-direction:column; gap:1rem;">
+      <p style="font-size:0.875rem; color:var(--text-secondary);">
+        Set a new login password for user <strong style="color:var(--text-primary);">${escapeHtml(userName)}</strong>.
+      </p>
+
+      <div class="form-group">
+        <label for="input-new-password" class="form-label">New Password *</label>
+        <div style="display:flex; gap:0.5rem;">
+          <input type="text" id="input-new-password" class="form-input" required minlength="6" placeholder="Enter new password" value="Moto@123" style="font-family:monospace;">
+          <button type="button" id="btn-generate-pw" class="btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:0.75rem;">Generate</button>
+        </div>
+        <span style="font-size:0.75rem; color:var(--text-tertiary); margin-top:4px; display:block;">
+          Default recommendation is <code>Moto@123</code> or a custom strong password (min 6 characters).
+        </span>
+      </div>
+    </form>
+  `;
+
+  const overlay = openModal({
+    title: `Reset Password: ${escapeHtml(userName)}`,
+    contentHtml,
+    footerHtml: `
+      <div style="display:flex; justify-content:flex-end; gap:0.75rem; width:100%;">
+        <button type="button" class="btn-secondary" id="btn-cancel-pw-reset">Cancel</button>
+        <button type="button" class="btn-primary" id="btn-confirm-pw-reset">Update Password</button>
+      </div>
+    `,
+    size: "normal",
+  });
+
+  overlay.querySelector("#btn-cancel-pw-reset")?.addEventListener("click", () => overlay.remove());
+
+  overlay.querySelector("#btn-generate-pw")?.addEventListener("click", () => {
+    const randomPw = "Moto@" + Math.floor(1000 + Math.random() * 9000);
+    const pwInput = overlay.querySelector("#input-new-password");
+    if (pwInput) pwInput.value = randomPw;
+  });
+
+  overlay.querySelector("#btn-confirm-pw-reset")?.addEventListener("click", async () => {
+    const pwInput = overlay.querySelector("#input-new-password");
+    const newPassword = pwInput?.value.trim();
+    if (!newPassword || newPassword.length < 6) {
+      showToast("Password must be at least 6 characters.", "warning");
+      return;
+    }
+
+    const confirmBtn = overlay.querySelector("#btn-confirm-pw-reset");
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Updating...";
+
+    try {
+      const { data, error } = await supabase.functions.invoke("admin-users", {
+        body: {
+          action: "reset_password",
+          payload: { authUserId, newPassword },
+        },
+      });
+
+      if (error) throw error;
+
+      showToast(`Password updated successfully for ${userName}!`, "success");
+      overlay.remove();
+    } catch (err) {
+      console.error("Reset password error:", err);
+      showToast(`Password reset failed: ${formatSupabaseError(err)}`, "error");
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Update Password";
+    }
+  });
+}
+

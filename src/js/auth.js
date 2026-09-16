@@ -47,8 +47,22 @@ export async function initializeAuth() {
     currentAuthUser = session.user;
     // Retrieve validated server-side profile
     const profile = await fetchCurrentUserProfile();
+
+    // Check if account or assigned center has been deactivated
+    if (
+      !profile ||
+      profile.status !== "ACTIVE" ||
+      (profile.role === "CCI_USER" && profile.cci_status === "INACTIVE")
+    ) {
+      await supabase.auth.signOut();
+      currentUserProfile = null;
+      currentAuthUser = null;
+      notifyAuthListeners();
+      return { authenticated: false, reason: "DEACTIVATED" };
+    }
+
     notifyAuthListeners();
-    return { authenticated: !!profile, user: currentAuthUser, profile };
+    return { authenticated: true, user: currentAuthUser, profile };
   } catch (err) {
     console.error("Initialize Auth Error:", err);
     currentUserProfile = null;
@@ -136,6 +150,11 @@ export async function loginWithEmail(identifier, password) {
   if (!profile) {
     await supabase.auth.signOut();
     throw new Error("Account authenticated, but no active Motorola user profile was found. Please contact an Administrator.");
+  }
+
+  if (profile.role === "CCI_USER" && profile.cci_status === "INACTIVE") {
+    await supabase.auth.signOut();
+    throw new Error(`Your service center (CCI ${profile.cci_code || ""}) is currently deactivated. Please contact your Service Manager.`);
   }
 
   if (profile.status !== "ACTIVE") {

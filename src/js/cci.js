@@ -204,16 +204,29 @@ function attachCciActions(mount, totalRecords, currentCcis) {
 
       const confirmed = await confirmDialog({
         title: `${newStat === "ACTIVE" ? "Activate" : "Deactivate"} CCI Center`,
-        message: `Are you sure you want to mark this center as ${newStat}?`,
-        confirmText: newStat === "ACTIVE" ? "Activate" : "Deactivate",
+        message:
+          newStat === "INACTIVE"
+            ? `Are you sure you want to mark this center as INACTIVE? All user login accounts assigned to this center will also be deactivated immediately.`
+            : `Are you sure you want to reactivate this center? Assigned user login accounts will also be reactivated.`,
+        confirmText: newStat === "ACTIVE" ? "Activate Center" : "Deactivate Center",
         isDanger: newStat === "INACTIVE",
       });
 
       if (confirmed) {
         try {
+          const { data: cciRec } = await supabase.from("cci_master").select("cci_code").eq("id", id).single();
           const { error } = await supabase.from("cci_master").update({ status: newStat }).eq("id", id);
           if (error) throw error;
-          showToast(`CCI status updated to ${newStat}.`, "success");
+
+          if (cciRec?.cci_code) {
+            await supabase
+              .from("user_profiles")
+              .update({ status: newStat })
+              .eq("cci_code", cciRec.cci_code)
+              .eq("role", "CCI_USER");
+          }
+
+          showToast(`CCI center and its user accounts updated to ${newStat}.`, "success");
           loadCciTable();
         } catch (e) {
           showToast(`Update failed: ${formatSupabaseError(e)}`, "error");
