@@ -106,12 +106,21 @@ function updateCciDropdownOptions(selectedRegion) {
   if (!select) return;
 
   const isBsmUser = isBSM();
+  const assignedRegions = getUserAssignedRegions();
   const previousVal = cciFilter;
   select.innerHTML = `<option value="">${isBsmUser ? "All Assigned CCIs" : "All CCIs"}</option>`;
 
-  const filtered = selectedRegion
-    ? cachedCcis.filter((c) => (c.region || "").trim().toLowerCase() === selectedRegion.trim().toLowerCase())
-    : cachedCcis;
+  let filtered = [];
+  if (selectedRegion) {
+    filtered = cachedCcis.filter(
+      (c) => (c.region || "").trim().toLowerCase() === selectedRegion.trim().toLowerCase()
+    );
+  } else if (isBsmUser && assignedRegions.length > 0) {
+    const assignedSet = new Set(assignedRegions.map((r) => r.trim().toLowerCase()));
+    filtered = cachedCcis.filter((c) => assignedSet.has((c.region || "").trim().toLowerCase()));
+  } else {
+    filtered = cachedCcis;
+  }
 
   filtered.forEach((c) => {
     const opt = document.createElement("option");
@@ -139,6 +148,12 @@ async function populateFilterOptions() {
       const DEMO_CODES = new Set(["BLR01", "DEL01", "MUM01", "KOC01", "KOL01"]);
       const hasStationCodes = data.some((c) => !DEMO_CODES.has(c.cci_code));
       cachedCcis = hasStationCodes ? data.filter((c) => !DEMO_CODES.has(c.cci_code)) : data;
+
+      // Strictly filter cachedCcis to assigned regions if BSM user
+      if (isBsmUser && assignedRegions.length > 0) {
+        const assignedSet = new Set(assignedRegions.map((r) => r.trim().toLowerCase()));
+        cachedCcis = cachedCcis.filter((c) => assignedSet.has((c.region || "").trim().toLowerCase()));
+      }
 
       if (regSelect) {
         regSelect.innerHTML = "";
