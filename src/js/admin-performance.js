@@ -4,6 +4,7 @@
 // ============================================================================
 
 import { supabase, formatSupabaseError, subscribeToTable, unsubscribeChannel } from "./supabase.js";
+import { isBSM, getUserAssignedRegions } from "./auth.js";
 import { icons, escapeHtml, renderRatingBadge } from "./utils.js";
 import { renderKpiCard } from "../components/kpi-card.js";
 import { renderSpinner } from "../components/loading.js";
@@ -78,7 +79,7 @@ export async function renderAdminPerformancePage(container) {
           <input type="text" id="perf-search-input" placeholder="Search CCI code, name, city..." class="form-input" style="padding:5px 10px; font-size:0.8125rem; width:220px;">
           
           <select id="perf-region-filter" class="filter-select" style="font-size:0.8125rem; padding:5px 10px;">
-            <option value="">All Regions</option>
+            <option value="">${isBSM() ? `All My Regions (${getUserAssignedRegions().join(", ") || "Assigned"})` : "All Regions"}</option>
           </select>
 
           <select id="perf-tier-filter" class="filter-select" style="font-size:0.8125rem; padding:5px 10px;">
@@ -210,15 +211,23 @@ async function loadPerformanceMetrics() {
     // Dynamically populate Region options from actual station mapping
     const regSelect = document.getElementById("perf-region-filter");
     if (regSelect && regSelect.options.length <= 1) {
+      const isBsmUser = isBSM();
+      const assignedRegions = getUserAssignedRegions();
       const currentVal = filterRegion;
-      regSelect.innerHTML = `<option value="">All Regions</option>`;
-      const uniqueRegions = Array.from(
-        new Set(
-          allCciData
-            .map((c) => (c.region || "").trim())
-            .filter((r) => r.length > 0)
-        )
-      ).sort();
+      regSelect.innerHTML = `<option value="">${isBsmUser ? `All My Regions (${assignedRegions.join(", ") || "Assigned"})` : "All Regions"}</option>`;
+      
+      let uniqueRegions = [];
+      if (isBsmUser && assignedRegions.length > 0) {
+        uniqueRegions = [...assignedRegions].sort();
+      } else {
+        uniqueRegions = Array.from(
+          new Set(
+            allCciData
+              .map((c) => (c.region || "").trim())
+              .filter((r) => r.length > 0)
+          )
+        ).sort();
+      }
 
       uniqueRegions.forEach((reg) => {
         const opt = document.createElement("option");

@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { supabase, formatSupabaseError } from "./supabase.js";
+import { isAdmin, isBSM, getUserAssignedRegions } from "./auth.js";
 import { formatDate, formatDateTime, formatMobile, escapeHtml, debounce, icons, renderStatusBadge } from "./utils.js";
 import { renderDataTableWrapper } from "../components/table.js";
 import { renderTableSkeleton } from "../components/loading.js";
@@ -12,28 +13,51 @@ let currentPage = 1;
 const PAGE_SIZE = 15;
 let searchQuery = "";
 let cciFilter = "";
+let regionFilter = "";
+let cachedCcis = [];
 
 export async function renderClosuresPage(container) {
   currentPage = 1;
   searchQuery = "";
   cciFilter = "";
+  regionFilter = "";
+
+  const isBsmUser = isBSM();
+  const assignedRegions = getUserAssignedRegions();
 
   container.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem;">
       <div>
-        <h2 style="font-size:1.375rem; font-weight:700; color:var(--text-primary);">Motorola Closure Master Database</h2>
-        <p style="font-size:0.875rem; color:var(--text-secondary);">Complete source record of service closures across all authorized partner centers.</p>
+        <h2 style="font-size:1.375rem; font-weight:700; color:var(--text-primary);">
+          ${isBsmUser ? "Regional Closure Records Database" : "Motorola Closure Master Database"}
+        </h2>
+        <p style="font-size:0.875rem; color:var(--text-secondary);">
+          ${
+            isBsmUser
+              ? `Service closures scoped to your assigned regions (${assignedRegions.join(", ") || "Assigned"}).`
+              : "Complete source record of service closures across all authorized partner centers."
+          }
+        </p>
       </div>
 
-      <div style="display:flex; gap:0.5rem; align-items:center;">
-        <select id="closures-cci-filter" class="form-select" style="padding:6px 12px; font-size:0.8125rem;">
-          <option value="">All CCIs</option>
+      <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+        <select id="closures-region-filter" class="form-select" style="padding:6px 12px; font-size:0.8125rem;">
+          <option value="">${isBsmUser ? `All My Regions (${assignedRegions.join(", ") || "Assigned"})` : "All Regions"}</option>
         </select>
 
+        <select id="closures-cci-filter" class="form-select" style="padding:6px 12px; font-size:0.8125rem;">
+          <option value="">${isBsmUser ? "All Assigned CCIs" : "All CCIs"}</option>
+        </select>
+
+        ${
+          isAdmin()
+            ? `
         <a href="#/admin/import" class="btn-primary" style="padding:6px 14px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;">
           <span style="width:16px; height:16px;">${icons.upload}</span>
           <span>Upload Closures</span>
-        </a>
+        </a>`
+            : ""
+        }
       </div>
     </div>
 
@@ -59,7 +83,14 @@ export async function renderClosuresPage(container) {
     </div>
   `;
 
-  await populateCciOptions();
+  await populateFilterOptions();
+
+  document.getElementById("closures-region-filter")?.addEventListener("change", (e) => {
+    regionFilter = e.target.value;
+    updateCciDropdownOptions(regionFilter);
+    currentPage = 1;
+    loadClosuresTable();
+  });
 
   document.getElementById("closures-cci-filter")?.addEventListener("change", (e) => {
     cciFilter = e.target.value;
@@ -70,26 +101,79 @@ export async function renderClosuresPage(container) {
   await loadClosuresTable();
 }
 
-async function populateCciOptions() {
+function updateCciDropdownOptions(selectedRegion) {
   const select = document.getElementById("closures-cci-filter");
   if (!select) return;
 
+  const isBsmUser = isBSM();
+  const previousVal = cciFilter;
+  select.innerHTML = `<option value="">${isBsmUser ? "All Assigned CCIs" : "All CCIs"}</option>`;
+
+  const filtered = selectedRegion
+    ? cachedCcis.filter((c) => (c.region || "").trim().toLowerCase() === selectedRegion.trim().toLowerCase())
+    : cachedCcis;
+
+  filtered.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = c.cci_code;
+    opt.textContent = `${c.cci_code} - ${c.cci_name}${!selectedRegion && c.region ? ` (${c.region})` : ""}`;
+    select.appendChild(opt);
+  });
+
+  if (previousVal && filtered.some((c) => c.cci_code === previousVal)) {
+    select.value = previousVal;
+  } else {
+    cciFilter = "";
+    select.value = "";
+  }
+}
+
+async function populateFilterOptions() {
+  const regSelect = document.getElementById("closures-region-filter");
+  const isBsmUser = isBSM();
+  const assignedRegions = getUserAssignedRegions();
+
   try {
-    const { data } = await supabase.from("cci_master").select("cci_code, cci_name").order("cci_code");
+    const { data } = await supabase.from("cci_master").select("cci_code, cci_name, region").order("cci_code");
     if (data) {
       const DEMO_CODES = new Set(["BLR01", "DEL01", "MUM01", "KOC01", "KOL01"]);
       const hasStationCodes = data.some((c) => !DEMO_CODES.has(c.cci_code));
-      const activeData = hasStationCodes ? data.filter((c) => !DEMO_CODES.has(c.cci_code)) : data;
+      cachedCcis = hasStationCodes ? data.filter((c) => !DEMO_CODES.has(c.cci_code)) : data;
 
-      activeData.forEach((c) => {
-        const opt = document.createElement("option");
-        opt.value = c.cci_code;
-        opt.textContent = `${c.cci_code} - ${c.cci_name}`;
-        select.appendChild(opt);
-      });
+      if (regSelect) {
+        regSelect.innerHTML = "";
+        const defaultOpt = document.createElement("option");
+        defaultOpt.value = "";
+        defaultOpt.textContent = isBsmUser
+          ? `All My Regions (${assignedRegions.join(", ") || "Assigned"})`
+          : "All Regions";
+        regSelect.appendChild(defaultOpt);
+
+        let uniqueRegions = [];
+        if (isBsmUser && assignedRegions.length > 0) {
+          uniqueRegions = [...assignedRegions].sort();
+        } else {
+          uniqueRegions = Array.from(
+            new Set(
+              cachedCcis
+                .map((c) => (c.region || "").trim())
+                .filter((r) => r.length > 0)
+            )
+          ).sort();
+        }
+
+        uniqueRegions.forEach((reg) => {
+          const opt = document.createElement("option");
+          opt.value = reg;
+          opt.textContent = reg;
+          regSelect.appendChild(opt);
+        });
+      }
+
+      updateCciDropdownOptions(regionFilter);
     }
   } catch (e) {
-    console.warn("CCI dropdown load warning:", e);
+    console.warn("Closures filter options load warning:", e);
   }
 }
 
@@ -104,6 +188,15 @@ export async function loadClosuresTable() {
 
     if (cciFilter) {
       query = query.eq("cci_code", cciFilter);
+    } else if (regionFilter) {
+      const regionCcis = cachedCcis
+        .filter((c) => (c.region || "").trim().toLowerCase() === regionFilter.trim().toLowerCase())
+        .map((c) => c.cci_code);
+      if (regionCcis.length > 0) {
+        query = query.in("cci_code", regionCcis);
+      } else {
+        query = query.eq("cci_code", "__NO_MATCH__");
+      }
     }
 
     if (searchQuery) {

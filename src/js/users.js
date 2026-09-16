@@ -174,6 +174,13 @@ export async function loadUsersTable() {
             <td><span style="font-size:0.8125rem;">${formatDateTime(u.created_at)}</span></td>
             <td style="text-align:right;">
               <div style="display:inline-flex; gap:0.35rem;">
+                ${
+                  u.role === "BSM"
+                    ? `<button type="button" class="btn-secondary btn-edit-regions" data-id="${u.id}" data-name="${escapeHtml(u.user_name)}" data-regions='${JSON.stringify(u.assigned_regions || [])}' style="padding:4px 8px; font-size:0.75rem; color:var(--moto-blue-accent); font-weight:600;">
+                        Edit Regions
+                      </button>`
+                    : ""
+                }
                 <button type="button" class="btn-secondary btn-reset-pw" data-auth="${u.auth_user_id}" data-name="${escapeHtml(u.user_name)}" style="padding:4px 8px; font-size:0.75rem;">
                   Reset PW
                 </button>
@@ -245,6 +252,21 @@ function attachUserActions(mount, totalRecords) {
       }, 300)
     );
   }
+
+  // Edit BSM assigned regions
+  mount.querySelectorAll(".btn-edit-regions").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const userId = btn.getAttribute("data-id");
+      const userName = btn.getAttribute("data-name");
+      let currentRegions = [];
+      try {
+        currentRegions = JSON.parse(btn.getAttribute("data-regions") || "[]");
+      } catch (e) {
+        currentRegions = [];
+      }
+      showEditRegionsModal(userId, userName, currentRegions);
+    });
+  });
 
   // Reset user password
   mount.querySelectorAll(".btn-reset-pw").forEach((btn) => {
@@ -505,4 +527,123 @@ function showResetPasswordModal(authUserId, userName) {
     }
   });
 }
+
+/**
+ * Modal to edit assigned regions for an existing BSM user
+ */
+async function showEditRegionsModal(userId, userName, currentRegions) {
+  let availableRegions = [];
+  try {
+    const { data: cciList } = await supabase.from("cci_master").select("region");
+    if (cciList) {
+      availableRegions = Array.from(new Set(cciList.map((c) => (c.region || "").trim()).filter(Boolean))).sort();
+    }
+  } catch (e) {
+    console.warn("Region load error:", e);
+  }
+
+  if (availableRegions.length === 0) {
+    availableRegions = ["North-1", "North-2", "East", "South-1", "South-2", "South-3", "West", "Central"];
+  }
+
+  const modalBody = `
+    <div style="margin-bottom:1rem;">
+      <p style="font-size:0.875rem; color:var(--text-secondary); margin-bottom:0.75rem;">
+        Select the operational regions assigned to <strong>${escapeHtml(userName)}</strong>. This Regional Manager (BSM) will immediately have their access strictly scoped to CCIs mapped to these assigned regions.
+      </p>
+      
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+        <span style="font-size:0.8125rem; font-weight:600; color:var(--text-primary);">Operational Regions</span>
+        <div style="display:flex; gap:0.5rem;">
+          <button type="button" id="btn-edit-select-all" class="btn-secondary" style="font-size:0.75rem; padding:2px 8px;">Select All</button>
+          <button type="button" id="btn-edit-clear-all" class="btn-secondary" style="font-size:0.75rem; padding:2px 8px;">Clear All</button>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:0.5rem; max-height:220px; overflow-y:auto; padding:0.75rem; background:var(--bg-surface-subtle); border-radius:var(--radius-md); border:1px solid var(--border-subtle);">
+        ${availableRegions
+          .map(
+            (r) => `
+          <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.85rem; cursor:pointer;">
+            <input type="checkbox" name="edit-bsm-region-chk" value="${escapeHtml(r)}" ${currentRegions.includes(r) ? "checked" : ""}>
+            <span>${escapeHtml(r)}</span>
+          </label>
+        `
+          )
+          .join("")}
+      </div>
+    </div>
+
+    <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.25rem;">
+      <button type="button" id="btn-cancel-edit-regions" class="btn-secondary">Cancel</button>
+      <button type="button" id="btn-save-edit-regions" class="btn-primary">Save Assigned Regions</button>
+    </div>
+  `;
+
+  const modal = openModal({
+    title: `Edit Assigned Regions: ${escapeHtml(userName)}`,
+    content: modalBody,
+  });
+
+  const modalEl = document.getElementById(modal.id);
+  if (!modalEl) return;
+
+  modalEl.querySelector("#btn-edit-select-all")?.addEventListener("click", () => {
+    modalEl.querySelectorAll('input[name="edit-bsm-region-chk"]').forEach((chk) => (chk.checked = true));
+  });
+
+  modalEl.querySelector("#btn-edit-clear-all")?.addEventListener("click", () => {
+    modalEl.querySelectorAll('input[name="edit-bsm-region-chk"]').forEach((chk) => (chk.checked = false));
+  });
+
+  modalEl.querySelector("#btn-cancel-edit-regions")?.addEventListener("click", () => {
+    modal.close();
+  });
+
+  modalEl.querySelector("#btn-save-edit-regions")?.addEventListener("click", async () => {
+    const saveBtn = modalEl.querySelector("#btn-save-edit-regions");
+    const selected = Array.from(modalEl.querySelectorAll('input[name="edit-bsm-region-chk"]:checked')).map(
+      (chk) => chk.value
+    );
+
+    if (selected.length === 0) {
+      showToast("Please select at least one operational region for this BSM.", "warning");
+      return;
+    }
+
+    try {
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Saving...";
+
+      // Call dedicated RPC
+      const { data, error } = await supabase.rpc("admin_update_bsm_regions", {
+        p_user_profile_id: userId,
+        p_assigned_regions: selected,
+      });
+
+      if (error) {
+        // Fallback to direct table update if RPC is pending in database
+        if (error.message && error.message.includes("does not exist")) {
+          const { error: directErr } = await supabase
+            .from("user_profiles")
+            .update({ assigned_regions: selected, updated_at: new Date().toISOString() })
+            .eq("id", userId);
+          if (directErr) throw directErr;
+        } else {
+          throw error;
+        }
+      }
+
+      showToast(`Updated assigned regions for ${userName} to: ${selected.join(", ")}`, "success");
+      modal.close();
+      loadUsersTable();
+    } catch (err) {
+      showToast(`Failed to update regions: ${formatSupabaseError(err)}`, "error");
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save Assigned Regions";
+    }
+  });
+}
+
 

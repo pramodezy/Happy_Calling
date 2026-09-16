@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { supabase, formatSupabaseError, subscribeToTable, unsubscribeChannel } from "./supabase.js";
+import { isAdmin, isBSM, getUserAssignedRegions } from "./auth.js";
 import { icons, escapeHtml, renderRatingBadge } from "./utils.js";
 import { renderKpiCard } from "../components/kpi-card.js";
 import { renderSpinner } from "../components/loading.js";
@@ -16,19 +17,27 @@ let filterCci = "";
 let filterRegion = "";
 let filterDateFrom = "";
 let filterDateTo = "";
+let cachedCcis = [];
 
 export async function renderAdminDashboard(container) {
+  const isBsmUser = isBSM();
+  const assignedRegions = getUserAssignedRegions();
+  const title = isBsmUser ? "Motorola Regional Operations Dashboard" : "Motorola Enterprise Care Dashboard";
+  const subtitle = isBsmUser
+    ? `Regional Happy Calling operations across assigned territories (${assignedRegions.join(", ") || "Assigned Regions"}).`
+    : "Company-wide Happy Calling operations, CCI partner rankings, and customer sentiment analytics.";
+
   container.innerHTML = `
     <!-- Header with Live Indicator -->
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem;">
       <div>
         <div style="display:flex; align-items:center; gap:0.5rem;">
-          <h2 style="font-size:1.375rem; font-weight:700; color:var(--text-primary);">Motorola Enterprise Care Dashboard</h2>
-          <span class="badge badge-success" style="font-size:0.6875rem; padding:2px 8px;">
-            <span class="badge-dot" style="animation:pulse 1.5s infinite;"></span> LIVE REALTIME
+          <h2 style="font-size:1.375rem; font-weight:700; color:var(--text-primary);">${title}</h2>
+          <span class="badge ${isBsmUser ? "badge-warning" : "badge-success"}" style="font-size:0.6875rem; padding:2px 8px;">
+            <span class="badge-dot" style="animation:pulse 1.5s infinite;"></span> ${isBsmUser ? "BSM SCOPED" : "LIVE REALTIME"}
           </span>
         </div>
-        <p style="font-size:0.875rem; color:var(--text-secondary);">Company-wide Happy Calling operations, CCI partner rankings, and customer sentiment analytics.</p>
+        <p style="font-size:0.875rem; color:var(--text-secondary);">${subtitle}</p>
       </div>
 
       <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
@@ -44,10 +53,15 @@ export async function renderAdminDashboard(container) {
           <span style="width:16px; height:16px;">${icons.smile}</span>
           <span>Feedback</span>
         </a>
+        ${
+          isAdmin()
+            ? `
         <a href="#/admin/import" class="btn-primary" style="padding:7px 14px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;">
           <span style="width:16px; height:16px;">${icons.upload}</span>
           <span>Import Closures</span>
-        </a>
+        </a>`
+            : ""
+        }
       </div>
     </div>
 
@@ -167,6 +181,7 @@ export async function renderAdminDashboard(container) {
 
   document.getElementById("admin-filter-region")?.addEventListener("change", (e) => {
     filterRegion = e.target.value;
+    updateCciDropdownOptions(filterRegion);
     loadAdminMetrics();
   });
 
@@ -185,14 +200,13 @@ export async function renderAdminDashboard(container) {
     filterRegion = "";
     filterDateFrom = "";
     filterDateTo = "";
-    const cciSel = document.getElementById("admin-filter-cci");
     const regSel = document.getElementById("admin-filter-region");
     const fromInput = document.getElementById("admin-filter-from");
     const toInput = document.getElementById("admin-filter-to");
-    if (cciSel) cciSel.value = "";
     if (regSel) regSel.value = "";
     if (fromInput) fromInput.value = "";
     if (toInput) toInput.value = "";
+    updateCciDropdownOptions("");
     loadAdminMetrics();
   });
 
@@ -205,6 +219,36 @@ export async function renderAdminDashboard(container) {
 }
 
 /**
+ * Dynamically updates the CCI dropdown based on the currently selected Region
+ */
+function updateCciDropdownOptions(selectedRegion) {
+  const cciSelect = document.getElementById("admin-filter-cci");
+  if (!cciSelect) return;
+
+  const isBsmUser = isBSM();
+  const previousVal = filterCci;
+  cciSelect.innerHTML = `<option value="">${isBsmUser ? "All Assigned CCIs" : "All CCIs"}</option>`;
+
+  const filteredCcis = selectedRegion
+    ? cachedCcis.filter((c) => (c.region || "").trim().toLowerCase() === selectedRegion.trim().toLowerCase())
+    : cachedCcis;
+
+  filteredCcis.forEach((c) => {
+    const opt = document.createElement("option");
+    opt.value = c.cci_code;
+    opt.textContent = `${c.cci_code} - ${c.cci_name}${!selectedRegion && c.region ? ` (${c.region})` : ""}`;
+    cciSelect.appendChild(opt);
+  });
+
+  if (previousVal && filteredCcis.some((c) => c.cci_code === previousVal)) {
+    cciSelect.value = previousVal;
+  } else {
+    filterCci = "";
+    cciSelect.value = "";
+  }
+}
+
+/**
  * Populate CCI and Region filter dropdowns dynamically from cci_master
  */
 async function populateFilters() {
@@ -212,13 +256,16 @@ async function populateFilters() {
   const regSelect = document.getElementById("admin-filter-region");
   if (!cciSelect && !regSelect) return;
 
+  const isBsmUser = isBSM();
+  const assignedRegions = getUserAssignedRegions();
+
   try {
     const { data } = await supabase.from("cci_master").select("cci_code, cci_name, region").order("cci_code");
     if (data) {
       // Legacy demo codes seeded during initial setup
       const DEMO_CODES = new Set(["BLR01", "DEL01", "MUM01", "KOC01", "KOL01"]);
       const hasStationCodes = data.some((c) => !DEMO_CODES.has(c.cci_code));
-      const activeData = hasStationCodes ? data.filter((c) => !DEMO_CODES.has(c.cci_code)) : data;
+      cachedCcis = hasStationCodes ? data.filter((c) => !DEMO_CODES.has(c.cci_code)) : data;
 
       // Clean up legacy demo records from database if real station mapping has been ingested
       if (hasStationCodes) {
@@ -227,25 +274,29 @@ async function populateFilters() {
         }).catch(() => {});
       }
 
-      if (cciSelect) {
-        // Keep "All CCIs" as first option
-        activeData.forEach((c) => {
-          const opt = document.createElement("option");
-          opt.value = c.cci_code;
-          opt.textContent = `${c.cci_code} - ${c.cci_name}`;
-          cciSelect.appendChild(opt);
-        });
-      }
-
       if (regSelect) {
-        // Collect all distinct regions mapped against station codes
-        const uniqueRegions = Array.from(
-          new Set(
-            activeData
-              .map((c) => (c.region || "").trim())
-              .filter((r) => r.length > 0)
-          )
-        ).sort();
+        regSelect.innerHTML = "";
+        const defaultOpt = document.createElement("option");
+        defaultOpt.value = "";
+        defaultOpt.textContent = isBsmUser
+          ? `All My Regions (${assignedRegions.join(", ") || "Assigned"})`
+          : "All Regions";
+        regSelect.appendChild(defaultOpt);
+
+        let uniqueRegions = [];
+        if (isBsmUser && assignedRegions.length > 0) {
+          // Strictly show assigned regions for BSM
+          uniqueRegions = [...assignedRegions].sort();
+        } else {
+          // Distinct regions from master data for Admin
+          uniqueRegions = Array.from(
+            new Set(
+              cachedCcis
+                .map((c) => (c.region || "").trim())
+                .filter((r) => r.length > 0)
+            )
+          ).sort();
+        }
 
         uniqueRegions.forEach((reg) => {
           const opt = document.createElement("option");
@@ -254,6 +305,9 @@ async function populateFilters() {
           regSelect.appendChild(opt);
         });
       }
+
+      // Initialize CCI dropdown based on initial (empty) region filter
+      updateCciDropdownOptions(filterRegion);
     }
   } catch (err) {
     console.warn("Could not load filter options from cci_master:", err);
