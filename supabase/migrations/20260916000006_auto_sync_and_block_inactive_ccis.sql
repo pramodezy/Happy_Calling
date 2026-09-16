@@ -179,6 +179,8 @@ END;
 $$;
 
 -- 5. ADMIN RESET USER PASSWORD (RPC DIRECT EXECUTION, NO EDGE FUNCTION NEEDED)
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
 CREATE OR REPLACE FUNCTION public.admin_reset_user_password(
     p_auth_user_id UUID,
     p_new_password TEXT
@@ -186,8 +188,10 @@ CREATE OR REPLACE FUNCTION public.admin_reset_user_password(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, auth
+SET search_path = public, auth, extensions
 AS $$
+DECLARE
+    v_hashed_pw TEXT;
 BEGIN
     IF NOT public.is_admin() THEN
         RAISE EXCEPTION 'Forbidden: Only administrators can reset user passwords';
@@ -197,8 +201,15 @@ BEGIN
         RAISE EXCEPTION 'Password must be at least 6 characters long';
     END IF;
 
+    -- Generate hash resolving pgcrypto functions across schemas
+    BEGIN
+        v_hashed_pw := extensions.crypt(p_new_password, extensions.gen_salt('bf', 10));
+    EXCEPTION WHEN OTHERS THEN
+        v_hashed_pw := crypt(p_new_password, gen_salt('bf', 10));
+    END;
+
     UPDATE auth.users
-    SET encrypted_password = crypt(p_new_password, gen_salt('bf', 10)),
+    SET encrypted_password = v_hashed_pw,
         updated_at = now()
     WHERE id = p_auth_user_id;
 
