@@ -145,10 +145,11 @@ function handleIncomingOpenCallsFile(file) {
   reader.onload = (e) => {
     try {
       const data = new Uint8Array(e.target.result);
-      const workbook = XLSX.read(data, { type: "array", cellDates: true });
+      // Use raw: true and cellDates: false to prevent SheetJS from internally guessing US MM/DD/YY dates on CSV files
+      const workbook = XLSX.read(data, { type: "array", raw: true, cellDates: false });
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
-      const rawRows = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+      const rawRows = XLSX.utils.sheet_to_json(worksheet, { defval: "", raw: true });
 
       if (!rawRows || rawRows.length === 0) {
         previewArea.innerHTML = `
