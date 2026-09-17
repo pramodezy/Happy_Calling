@@ -328,7 +328,10 @@ async function showCreateUserModal() {
 
       <div class="form-group">
         <label for="new-user-email" class="form-label">Email Address (Login Username) *</label>
-        <input type="email" id="new-user-email" class="form-input" required placeholder="agent@motorolacare.in">
+        <input type="text" id="new-user-email" class="form-input" required placeholder="e.g. cci_120 or cci_120@happycalling.in">
+        <small style="font-size:0.75rem; color:var(--text-tertiary); margin-top:3px; display:block;">
+          For CCI Users, you can enter <code>cci_120</code> or full email. The user can log in with either.
+        </small>
       </div>
 
       <div class="form-group">
@@ -393,6 +396,24 @@ async function showCreateUserModal() {
   const roleSelect = overlay.querySelector("#new-user-role");
   const cciGroup = overlay.querySelector("#group-assign-cci");
   const regionsGroup = overlay.querySelector("#group-assign-regions");
+  const cciSelect = overlay.querySelector("#new-user-cci");
+  const userNameInput = overlay.querySelector("#new-user-name");
+  const emailInput = overlay.querySelector("#new-user-email");
+
+  // Auto-fill username & email when selecting a CCI
+  cciSelect?.addEventListener("change", (e) => {
+    const selectedCode = e.target.value;
+    if (!selectedCode) return;
+    const clean = selectedCode.toLowerCase().replace(/^cci_?/, "");
+    const selText = e.target.options[e.target.selectedIndex]?.text || "";
+
+    if (!emailInput.value || emailInput.value.startsWith("cci_")) {
+      emailInput.value = `cci_${clean}@happycalling.in`;
+    }
+    if (!userNameInput.value || userNameInput.value.startsWith("cci_") || userNameInput.value.includes("CCI")) {
+      userNameInput.value = selText || `CCI Station ${clean}`;
+    }
+  });
 
   roleSelect?.addEventListener("change", (e) => {
     const val = e.target.value;
@@ -403,11 +424,10 @@ async function showCreateUserModal() {
   overlay.querySelector("#modal-btn-cancel")?.addEventListener("click", closeModal);
 
   overlay.querySelector("#modal-btn-save-user")?.addEventListener("click", async () => {
-    const userName = overlay.querySelector("#new-user-name")?.value.trim();
-    const email = overlay.querySelector("#new-user-email")?.value.trim();
+    const userName = userNameInput?.value.trim();
+    let email = emailInput?.value.trim();
     const password = overlay.querySelector("#new-user-password")?.value;
     const role = roleSelect?.value;
-    const cciSelect = overlay.querySelector("#new-user-cci");
     const cciCode = cciSelect?.value;
 
     if (!userName || !email || !password || !role) {
@@ -418,6 +438,16 @@ async function showCreateUserModal() {
     if (role === "CCI_USER" && !cciCode) {
       showToast("Please assign a CCI location for CCI User accounts.", "warning");
       return;
+    }
+
+    // Auto-normalize username to email if no domain given (e.g. "cci_120" -> "cci_120@happycalling.in")
+    if (!email.includes("@")) {
+      if (role === "CCI_USER" && cciCode) {
+        const clean = cciCode.toLowerCase().replace(/^cci_?/, "");
+        email = `cci_${clean}@happycalling.in`;
+      } else {
+        email = `${email.toLowerCase()}@happycalling.in`;
+      }
     }
 
     let selectedRegions = [];
