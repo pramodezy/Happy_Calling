@@ -404,21 +404,36 @@ export async function loadPendingTable() {
       totalRecords,
     });
 
-    // Reattach Pagination Listeners
-    document.getElementById("btn-prev-page")?.addEventListener("click", () => {
+    const totalPages = Math.max(1, Math.ceil(totalRecords / PAGE_SIZE));
+
+    // Reattach Pagination Listeners (supports both ID patterns)
+    tableMount.querySelector("#btn-page-prev, #btn-prev-page")?.addEventListener("click", () => {
       if (currentPage > 1) {
         currentPage--;
         loadPendingTable();
       }
     });
 
-    document.getElementById("btn-next-page")?.addEventListener("click", () => {
-      const maxPage = Math.ceil(totalRecords / PAGE_SIZE);
-      if (currentPage < maxPage) {
+    tableMount.querySelector("#btn-page-next, #btn-next-page")?.addEventListener("click", () => {
+      if (currentPage < totalPages) {
         currentPage++;
         loadPendingTable();
       }
     });
+
+    // Reattach search input listener and restore current query
+    const searchInput = tableMount.querySelector("#table-search-input");
+    if (searchInput) {
+      searchInput.value = searchQuery;
+      searchInput.addEventListener(
+        "input",
+        debounce((e) => {
+          searchQuery = e.target.value.trim();
+          currentPage = 1;
+          loadPendingTable();
+        }, 300)
+      );
+    }
   } catch (err) {
     console.error("loadPendingTable error:", err);
     tableMount.innerHTML = `

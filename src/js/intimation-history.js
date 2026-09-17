@@ -171,20 +171,34 @@ export async function loadHistoryTable() {
       totalRecords,
     });
 
-    document.getElementById("btn-prev-page")?.addEventListener("click", () => {
+    const totalPages = Math.max(1, Math.ceil(totalRecords / PAGE_SIZE));
+
+    tableMount.querySelector("#btn-page-prev, #btn-prev-page")?.addEventListener("click", () => {
       if (currentPage > 1) {
         currentPage--;
         loadHistoryTable();
       }
     });
 
-    document.getElementById("btn-next-page")?.addEventListener("click", () => {
-      const maxPage = Math.ceil(totalRecords / PAGE_SIZE);
-      if (currentPage < maxPage) {
+    tableMount.querySelector("#btn-page-next, #btn-next-page")?.addEventListener("click", () => {
+      if (currentPage < totalPages) {
         currentPage++;
         loadHistoryTable();
       }
     });
+
+    const searchInput = tableMount.querySelector("#table-search-input");
+    if (searchInput) {
+      searchInput.value = searchQuery;
+      searchInput.addEventListener(
+        "input",
+        debounce((e) => {
+          searchQuery = e.target.value.trim();
+          currentPage = 1;
+          loadHistoryTable();
+        }, 300)
+      );
+    }
   } catch (err) {
     console.error("loadHistoryTable error:", err);
     tableMount.innerHTML = `
