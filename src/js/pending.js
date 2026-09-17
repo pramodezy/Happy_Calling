@@ -95,17 +95,30 @@ export async function renderPendingPage(container) {
     loadPendingTable();
   });
 
-  const searchInput = document.getElementById("table-search-input");
-  if (searchInput) {
-    searchInput.addEventListener(
-      "input",
-      debounce((e) => {
-        searchQuery = e.target.value.trim();
-        currentPage = 1;
+  // Attach Delegated Pagination Listener to container so clicks always register
+  container.addEventListener("click", (e) => {
+    const nextBtn = e.target.closest("#btn-page-next, #btn-next-page, [data-action='next-page']");
+    if (nextBtn) {
+      e.preventDefault();
+      if (!nextBtn.disabled && !nextBtn.hasAttribute("disabled")) {
+        currentPage++;
         loadPendingTable();
-      }, 300)
-    );
-  }
+        document.getElementById("pending-table-container")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
+
+    const prevBtn = e.target.closest("#btn-page-prev, #btn-prev-page, [data-action='prev-page']");
+    if (prevBtn) {
+      e.preventDefault();
+      if (!prevBtn.disabled && !prevBtn.hasAttribute("disabled") && currentPage > 1) {
+        currentPage--;
+        loadPendingTable();
+        document.getElementById("pending-table-container")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
+  });
 
   await loadPendingSummaryKpis();
   await loadPendingTable();
@@ -190,6 +203,13 @@ async function loadPendingSummaryKpis() {
 export async function loadPendingTable() {
   const tableMount = document.getElementById("pending-table-container");
   if (!tableMount) return;
+
+  // Immediate visual feedback while data query runs
+  const tbody = tableMount.querySelector("#table-body-content");
+  if (tbody) {
+    tbody.style.opacity = "0.4";
+    tbody.style.pointerEvents = "none";
+  }
 
   const profile = getCurrentProfile();
   if (!profile) return;
@@ -407,17 +427,19 @@ export async function loadPendingTable() {
     const totalPages = Math.max(1, Math.ceil(totalRecords / PAGE_SIZE));
 
     // Reattach Pagination Listeners (supports both ID patterns)
-    tableMount.querySelector("#btn-page-prev, #btn-prev-page")?.addEventListener("click", () => {
+    tableMount.querySelector("#btn-page-prev, #btn-prev-page, [data-action='prev-page']")?.addEventListener("click", () => {
       if (currentPage > 1) {
         currentPage--;
         loadPendingTable();
+        tableMount.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     });
 
-    tableMount.querySelector("#btn-page-next, #btn-next-page")?.addEventListener("click", () => {
+    tableMount.querySelector("#btn-page-next, #btn-next-page, [data-action='next-page']")?.addEventListener("click", () => {
       if (currentPage < totalPages) {
         currentPage++;
         loadPendingTable();
+        tableMount.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     });
 

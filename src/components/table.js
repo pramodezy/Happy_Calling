@@ -59,9 +59,9 @@ export function renderDataTableWrapper({
           Showing <strong>${fromRecord}</strong> to <strong>${toRecord}</strong> of <strong>${totalRecords}</strong> records
         </div>
         <div class="pagination-controls">
-          <button type="button" class="btn-page" id="btn-page-prev" ${page <= 1 ? "disabled" : ""}>Previous</button>
+          <button type="button" class="btn-page" id="btn-page-prev" data-action="prev-page" ${page <= 1 ? "disabled" : ""}>Previous</button>
           <span style="padding:0 0.5rem; font-weight:600;">Page ${page} of ${totalPages}</span>
-          <button type="button" class="btn-page" id="btn-page-next" ${page >= totalPages ? "disabled" : ""}>Next</button>
+          <button type="button" class="btn-page" id="btn-page-next" data-action="next-page" ${page >= totalPages ? "disabled" : ""}>Next</button>
         </div>
       </div>
     </div>
