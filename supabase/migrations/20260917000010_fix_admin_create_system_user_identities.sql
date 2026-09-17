@@ -2,16 +2,17 @@
 -- MIGRATION: Fix admin_create_system_user, add auth.identities, & repair cci_120
 -- ==============================================================================
 
--- 1. REPAIR USER cci_120 IMMEDIATELY
+-- 1. REPAIR USERS cci_120 & cci_123 IMMEDIATELY
 DO $$
 DECLARE
+    v_codes TEXT[] := ARRAY['120', '123'];
+    v_code TEXT;
     v_user_id UUID;
-    v_email TEXT := 'cci_120@happycalling.in';
-    v_username TEXT := 'cci_120';
-    v_cci_code TEXT := '120';
+    v_email TEXT;
+    v_username TEXT;
     v_password TEXT := 'Moto@123';
     v_hashed_pw TEXT;
-    v_cci_name TEXT := '120 - Sanjay Mobile';
+    v_cci_name TEXT;
 BEGIN
     BEGIN
         v_hashed_pw := extensions.crypt(v_password, extensions.gen_salt('bf', 10));
@@ -19,80 +20,91 @@ BEGIN
         v_hashed_pw := crypt(v_password, gen_salt('bf', 10));
     END;
 
-    SELECT cci_name INTO v_cci_name FROM public.cci_master WHERE cci_code = v_cci_code;
-    IF v_cci_name IS NULL THEN
-        v_cci_name := '120 - Sanjay Mobile';
-    END IF;
+    FOREACH v_code IN ARRAY v_codes
+    LOOP
+        v_username := 'cci_' || v_code;
+        v_email := v_username || '@happycalling.in';
+        v_cci_name := NULL;
 
-    -- Look for existing account created with 'cci_120' or email containing '120'
-    SELECT id INTO v_user_id 
-    FROM auth.users 
-    WHERE email = 'cci_120' OR email = v_email OR email ILIKE '%120%'
-    ORDER BY created_at DESC LIMIT 1;
+        -- Get name from cci_master if exists
+        SELECT cci_name INTO v_cci_name FROM public.cci_master WHERE cci_code = v_code;
+        IF v_cci_name IS NULL THEN
+            v_cci_name := 'CCI Station ' || v_code;
+        END IF;
 
-    IF v_user_id IS NULL THEN
-        v_user_id := gen_random_uuid();
-        INSERT INTO auth.users (
-            id, instance_id, email, encrypted_password, email_confirmed_at,
-            raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
-            role, aud, confirmation_token, recovery_token, email_change, email_change_token_new
+        -- Find user by email match or partial code match
+        SELECT id INTO v_user_id 
+        FROM auth.users 
+        WHERE email = v_username 
+           OR email = v_email 
+           OR email ILIKE '%' || v_code || '%'
+        ORDER BY created_at DESC LIMIT 1;
+
+        IF v_user_id IS NULL THEN
+            v_user_id := gen_random_uuid();
+            INSERT INTO auth.users (
+                id, instance_id, email, encrypted_password, email_confirmed_at,
+                raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+                role, aud, confirmation_token, recovery_token, email_change, email_change_token_new
+            ) VALUES (
+                v_user_id,
+                '00000000-0000-0000-0000-000000000000'::uuid,
+                v_email,
+                v_hashed_pw,
+                now(),
+                '{"provider":"email","providers":["email"]}'::jsonb,
+                jsonb_build_object('username', v_username, 'user_name', v_username, 'role', 'CCI_USER', 'cci_code', v_code),
+                now(), now(),
+                'authenticated', 'authenticated', '', '', '', ''
+            );
+        ELSE
+            UPDATE auth.users
+            SET email = v_email,
+                encrypted_password = v_hashed_pw,
+                email_confirmed_at = COALESCE(email_confirmed_at, now()),
+                raw_app_meta_data = '{"provider":"email","providers":["email"]}'::jsonb,
+                raw_user_meta_data = jsonb_build_object('username', v_username, 'user_name', v_username, 'role', 'CCI_USER', 'cci_code', v_code),
+                updated_at = now()
+            WHERE id = v_user_id;
+        END IF;
+
+        -- Upsert required auth.identities (MANDATORY for GoTrue password auth)
+        BEGIN
+            DELETE FROM auth.identities WHERE user_id = v_user_id OR id = v_user_id::text;
+            INSERT INTO auth.identities (
+                id, user_id, identity_data, provider, provider_id,
+                last_sign_in_at, created_at, updated_at
+            ) VALUES (
+                v_user_id::text,
+                v_user_id,
+                jsonb_build_object('sub', v_user_id::text, 'email', v_email),
+                'email',
+                v_user_id::text,
+                now(), now(), now()
+            );
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END;
+
+        -- Upsert user_profiles
+        INSERT INTO public.user_profiles (
+            auth_user_id, user_name, role, cci_code, cci_name, status
         ) VALUES (
             v_user_id,
-            '00000000-0000-0000-0000-000000000000'::uuid,
-            v_email,
-            v_hashed_pw,
-            now(),
-            '{"provider":"email","providers":["email"]}'::jsonb,
-            jsonb_build_object('username', v_username, 'user_name', v_username, 'role', 'CCI_USER', 'cci_code', v_cci_code),
-            now(), now(),
-            'authenticated', 'authenticated', '', '', '', ''
-        );
-    ELSE
-        UPDATE auth.users
-        SET email = v_email,
-            encrypted_password = v_hashed_pw,
-            email_confirmed_at = COALESCE(email_confirmed_at, now()),
-            raw_app_meta_data = '{"provider":"email","providers":["email"]}'::jsonb,
-            updated_at = now()
-        WHERE id = v_user_id;
-    END IF;
+            v_username,
+            'CCI_USER',
+            v_code,
+            v_cci_name,
+            'ACTIVE'
+        )
+        ON CONFLICT (auth_user_id) DO UPDATE
+        SET user_name = EXCLUDED.user_name,
+            role = 'CCI_USER',
+            cci_code = EXCLUDED.cci_code,
+            cci_name = EXCLUDED.cci_name,
+            status = 'ACTIVE';
 
-    -- Upsert required auth.identities
-    BEGIN
-        DELETE FROM auth.identities WHERE user_id = v_user_id OR id = v_user_id::text;
-        INSERT INTO auth.identities (
-            id, user_id, identity_data, provider, provider_id,
-            last_sign_in_at, created_at, updated_at
-        ) VALUES (
-            v_user_id::text,
-            v_user_id,
-            jsonb_build_object('sub', v_user_id::text, 'email', v_email),
-            'email',
-            v_user_id::text,
-            now(), now(), now()
-        );
-    EXCEPTION WHEN OTHERS THEN NULL;
-    END;
-
-    -- Upsert user_profiles
-    INSERT INTO public.user_profiles (
-        auth_user_id, user_name, role, cci_code, cci_name, status
-    ) VALUES (
-        v_user_id,
-        v_username,
-        'CCI_USER',
-        v_cci_code,
-        v_cci_name,
-        'ACTIVE'
-    )
-    ON CONFLICT (auth_user_id) DO UPDATE
-    SET user_name = EXCLUDED.user_name,
-        role = 'CCI_USER',
-        cci_code = EXCLUDED.cci_code,
-        cci_name = EXCLUDED.cci_name,
-        status = 'ACTIVE';
-
-    RAISE NOTICE 'Repaired user cci_120 (%)', v_email;
+        RAISE NOTICE 'Repaired user % (%) with password %', v_username, v_email, v_password;
+    END LOOP;
 END $$;
 
 -- 2. ROBUST FUTURE FIX: UPDATE admin_create_system_user
