@@ -65,7 +65,7 @@ const routes = {
   "#/intimation/history": { render: renderIntimationHistoryPage, requiresAuth: true },
   "#/intimation/performance": { render: renderIntimationPerformancePage, requiresAuth: true },
   "#/intimation/import": { render: renderIntimationImportPage, requiresAuth: true, adminOnly: true },
-  "#/intimation/admin": { render: renderAdminIntimationPage, requiresAuth: true, adminOnly: true },
+  "#/intimation/admin": { render: renderAdminIntimationPage, requiresAuth: true, adminOrBsm: true },
 };
 
 /**

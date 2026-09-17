@@ -4,7 +4,7 @@
 // ============================================================================
 
 import { supabase } from "./supabase.js";
-import { getCurrentProfile, isAdmin } from "./auth.js";
+import { getCurrentProfile, isAdmin, isBSM, hasAdminOrBsmAccess, getUserAssignedRegions } from "./auth.js";
 import { icons, escapeHtml, formatDate, formatDateTime } from "./utils.js";
 import { renderSpinner } from "../components/loading.js";
 import { renderKpiCard } from "../components/kpi-card.js";
@@ -13,13 +13,21 @@ export async function renderIntimationPerformancePage(container) {
   const admin = isAdmin();
   const profile = getCurrentProfile() || {};
 
+  const isBsmUser = isBSM();
+  const assignedRegions = getUserAssignedRegions();
+  const perfSubtitle = admin 
+    ? "Network-wide turnaround SLA compliance and customer ETR intimation analytics."
+    : isBsmUser
+    ? `Regional turnaround SLA and customer ETR intimation analytics for your assigned regions (${assignedRegions.join(", ") || "All Assigned"}).`
+    : `Turnaround SLA and resolution intimation metrics for ${escapeHtml(profile.cci_name || profile.cci_code || "your station")}.`;
+
   container.innerHTML = `
     <!-- Header -->
     <div style="margin-bottom:1.5rem; display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
       <div>
         <h2 style="font-size:1.375rem; font-weight:700; color:var(--text-primary);">Intimation &amp; ETR Performance</h2>
         <p style="font-size:0.875rem; color:var(--text-secondary);">
-          ${admin ? "Network-wide turnaround SLA compliance and customer ETR intimation analytics." : `Turnaround SLA and resolution intimation metrics for ${escapeHtml(profile.cci_name || profile.cci_code || "your station")}.`}
+          ${perfSubtitle}
         </p>
       </div>
 
@@ -64,7 +72,7 @@ async function loadIntimationPerformanceData(container) {
       .from("open_calls_master")
       .select("service_order, station_code, cci_code, carry_in_time, finish_repair_time, current_etr_date, eta_count, is_open");
 
-    if (!admin && cciCode) {
+    if (!hasAdminOrBsmAccess() && cciCode) {
       openCallsQuery = openCallsQuery.eq("cci_code", cciCode);
     }
 
@@ -76,7 +84,7 @@ async function loadIntimationPerformanceData(container) {
       .from("intimation_calling")
       .select("service_order, cci_code, etr_date, calling_status, eta_number, revision_reason, created_at");
 
-    if (!admin && cciCode) {
+    if (!hasAdminOrBsmAccess() && cciCode) {
       intimQuery = intimQuery.eq("cci_code", cciCode);
     }
 

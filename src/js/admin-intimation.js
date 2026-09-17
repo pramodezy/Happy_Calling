@@ -4,6 +4,7 @@
 // ============================================================================
 
 import { supabase } from "./supabase.js";
+import { isAdmin, isBSM, getUserAssignedRegions } from "./auth.js";
 import { icons, escapeHtml, formatDate, formatDateTime } from "./utils.js";
 import { renderSpinner } from "../components/loading.js";
 import { showToast } from "../components/toast.js";
@@ -11,20 +12,34 @@ import { showToast } from "../components/toast.js";
 let stationStats = [];
 
 export async function renderAdminIntimationPage(container) {
+  const isBsmUser = isBSM();
+  const assignedRegions = getUserAssignedRegions();
+  const title = isBsmUser ? "Regional Intimation Calling Command Center" : "Intimation Calling Administration";
+  const subtitle = isBsmUser 
+    ? `Monitor station-wise open calls inventory, SLA compliance, and ETR backlog for your assigned regions (${assignedRegions.join(", ") || "All Assigned"}).`
+    : "Monitor station-wise open calls inventory, ageing > 3 days SLA breach, and customer ETR intimations.";
+
   container.innerHTML = `
     <!-- Header -->
     <div style="margin-bottom:1.5rem; display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
       <div>
-        <h2 style="font-size:1.375rem; font-weight:700; color:var(--text-primary);">Intimation Calling Administration</h2>
-        <p style="font-size:0.875rem; color:var(--text-secondary);">
-          Monitor station-wise open calls inventory, ageing &gt; 3 days SLA breach, and customer ETR intimations.
+        <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.25rem;">
+          <h2 style="font-size:1.375rem; font-weight:700; color:var(--text-primary); margin:0;">${title}</h2>
+          <span class="badge ${isBsmUser ? "badge-warning" : "badge-success"}" style="font-size:0.6875rem; padding:2px 8px;">
+            ${isBsmUser ? "BSM REGIONAL SCOPED" : "ENTERPRISE WIDE"}
+          </span>
+        </div>
+        <p style="font-size:0.875rem; color:var(--text-secondary); margin:0;">
+          ${subtitle}
         </p>
       </div>
       <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-        <a href="#/intimation/import" class="btn-primary">
-          <span>${icons.upload}</span>
-          <span>Upload Open Calls File</span>
-        </a>
+        ${isAdmin() ? `
+          <a href="#/intimation/import" class="btn-primary">
+            <span>${icons.upload}</span>
+            <span>Upload Open Calls File</span>
+          </a>
+        ` : ""}
         <button id="btn-export-intimation-admin" class="btn-secondary">
           <span>${icons.download}</span>
           <span>Export Station Report</span>

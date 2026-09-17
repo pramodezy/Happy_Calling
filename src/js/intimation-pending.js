@@ -5,7 +5,7 @@
 // ============================================================================
 
 import { supabase, formatSupabaseError } from "./supabase.js";
-import { getCurrentProfile, isAdmin } from "./auth.js";
+import { getCurrentProfile, isAdmin, hasAdminOrBsmAccess } from "./auth.js";
 import { formatMobile, formatDate, formatDateTime, calculateAgeingDays, renderAgeingBadge, escapeHtml, debounce, icons } from "./utils.js";
 import { renderDataTableWrapper } from "../components/table.js";
 import { renderTableSkeleton, renderSpinner } from "../components/loading.js";
@@ -122,7 +122,7 @@ async function loadIntimationKpiMetrics() {
     const threeDaysAgoIso = new Date(nowMs - 3 * 24 * 60 * 60 * 1000).toISOString();
 
     let openQuery = supabase.from("open_calls_master").select("id, service_order, carry_in_time, current_etr_date, eta_count").eq("is_open", true);
-    if (!isAdmin()) {
+    if (!hasAdminOrBsmAccess() && profile.cci_code) {
       openQuery = openQuery.eq("cci_code", profile.cci_code);
     }
     const { data: openRows } = await openQuery;
@@ -222,7 +222,7 @@ async function loadOpenCallsTable() {
       )
       .eq("is_open", true);
 
-    if (!isAdmin()) {
+    if (!hasAdminOrBsmAccess() && profile.cci_code) {
       query = query.eq("cci_code", profile.cci_code);
     }
 

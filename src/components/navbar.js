@@ -9,7 +9,11 @@ import { getActiveWorkspace, setActiveWorkspace } from "../js/workspace.js";
 export function renderNavbar() {
   const profile = getCurrentProfile() || {};
   const initials = profile.user_name ? profile.user_name.substring(0, 2).toUpperCase() : "MO";
-  const roleLabel = profile.role === "ADMIN" ? "Company Administrator" : `${profile.cci_code || "CCI"} Partner`;
+  const roleLabel = profile.role === "ADMIN" 
+    ? "Company Administrator" 
+    : profile.role === "BSM" 
+    ? "Regional Manager (BSM)" 
+    : `${profile.cci_code || "CCI"} Partner`;
   const activeWorkspace = getActiveWorkspace();
 
   return `

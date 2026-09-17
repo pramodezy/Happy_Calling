@@ -3,7 +3,7 @@
 // Switches between "happy" (Happy Calling) and "intimation" (Intimation Calling)
 // ============================================================================
 
-import { isAdmin } from "./auth.js";
+import { isAdmin, hasAdminOrBsmAccess } from "./auth.js";
 
 const WORKSPACE_STORAGE_KEY = "__MOTO_ACTIVE_WORKSPACE__";
 
@@ -21,10 +21,10 @@ export function setActiveWorkspace(workspace) {
   }
   localStorage.setItem(WORKSPACE_STORAGE_KEY, workspace);
 
-  const admin = isAdmin();
+  const isExec = hasAdminOrBsmAccess();
   if (workspace === "intimation") {
-    window.location.hash = admin ? "#/intimation/admin" : "#/intimation/calling";
+    window.location.hash = isExec ? "#/intimation/admin" : "#/intimation/dashboard";
   } else {
-    window.location.hash = admin ? "#/admin" : "#/dashboard";
+    window.location.hash = isExec ? "#/admin" : "#/dashboard";
   }
 }

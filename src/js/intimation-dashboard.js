@@ -4,7 +4,7 @@
 // ============================================================================
 
 import { supabase } from "./supabase.js";
-import { getCurrentProfile, isAdmin } from "./auth.js";
+import { getCurrentProfile, isAdmin, isBSM, hasAdminOrBsmAccess } from "./auth.js";
 import { icons, escapeHtml, formatDate, formatDateTime } from "./utils.js";
 import { renderSpinner } from "../components/loading.js";
 
@@ -27,9 +27,11 @@ export async function renderIntimationDashboardPage(container) {
             <span>${icons.upload}</span>
             <span>Upload Open Calls</span>
           </a>
+        ` : ""}
+        ${hasAdminOrBsmAccess() ? `
           <a href="#/intimation/admin" class="btn-secondary">
             <span>${icons.shield}</span>
-            <span>Intimation Admin</span>
+            <span>${isBSM() ? "Regional Intimation" : "Intimation Admin"}</span>
           </a>
         ` : ""}
         <a href="#/intimation/calling" class="btn-primary">
@@ -90,7 +92,7 @@ async function loadIntimationDashboardData(container) {
 
     // Query 1: Open Calls base query
     let openCallsQuery = supabase.from("open_calls_master").select("id, service_order, carry_in_time, cci_code").eq("is_open", true);
-    if (!admin && cciCode) {
+    if (!hasAdminOrBsmAccess() && cciCode) {
       openCallsQuery = openCallsQuery.eq("cci_code", cciCode);
     }
     const { data: openCalls, error: openErr } = await openCallsQuery;
@@ -115,7 +117,7 @@ async function loadIntimationDashboardData(container) {
 
     // Query 2: Intimation calling stats
     let intimQuery = supabase.from("intimation_calling").select("id, service_order, etr_date, calling_status, created_at, cci_code");
-    if (!admin && cciCode) {
+    if (!hasAdminOrBsmAccess() && cciCode) {
       intimQuery = intimQuery.eq("cci_code", cciCode);
     }
     const { data: intimations, error: intimErr } = await intimQuery;
@@ -130,7 +132,7 @@ async function loadIntimationDashboardData(container) {
       .select("id, service_order, etr_date, calling_status, cci_comment, created_at, cci_code")
       .order("created_at", { ascending: false })
       .limit(6);
-    if (!admin && cciCode) {
+    if (!hasAdminOrBsmAccess() && cciCode) {
       recentQuery = recentQuery.eq("cci_code", cciCode);
     }
     const { data: recentLogs } = await recentQuery;

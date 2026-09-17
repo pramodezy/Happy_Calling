@@ -4,7 +4,7 @@
 // ============================================================================
 
 import { supabase, formatSupabaseError } from "./supabase.js";
-import { getCurrentProfile, isAdmin } from "./auth.js";
+import { getCurrentProfile, isAdmin, hasAdminOrBsmAccess } from "./auth.js";
 import { formatMobile, formatDate, formatDateTime, calculateAgeingDays, escapeHtml, icons } from "./utils.js";
 import { showToast } from "../components/toast.js";
 import { renderSpinner } from "../components/loading.js";
@@ -82,7 +82,7 @@ export async function loadNextIntimationCall(specificSoNumber = null) {
     if (specificSoNumber) {
       // Direct load by SO Number (from pending list click)
       let query = supabase.from("open_calls_master").select("*").eq("service_order", specificSoNumber.trim());
-      if (!isAdmin() && profile?.cci_code) {
+      if (!hasAdminOrBsmAccess() && profile?.cci_code) {
         query = query.eq("cci_code", profile.cci_code);
       }
       const { data, error } = await query.order("created_at", { ascending: false }).limit(1);
@@ -109,7 +109,7 @@ export async function loadNextIntimationCall(specificSoNumber = null) {
         .lte("current_etr_date", tomorrowStr)
         .lt("eta_count", 3);
 
-      if (!isAdmin()) {
+      if (!hasAdminOrBsmAccess() && profile?.cci_code) {
         qExpiring = qExpiring.eq("cci_code", profile.cci_code);
       }
 
@@ -129,7 +129,7 @@ export async function loadNextIntimationCall(specificSoNumber = null) {
         .eq("is_open", true)
         .lte("carry_in_time", threeDaysAgoIso);
 
-      if (!isAdmin()) {
+      if (!hasAdminOrBsmAccess() && profile?.cci_code) {
         q = q.eq("cci_code", profile.cci_code);
       }
 

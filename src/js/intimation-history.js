@@ -4,7 +4,7 @@
 // ============================================================================
 
 import { supabase, formatSupabaseError } from "./supabase.js";
-import { getCurrentProfile, isAdmin } from "./auth.js";
+import { getCurrentProfile, isAdmin, hasAdminOrBsmAccess } from "./auth.js";
 import { formatDate, formatDateTime, formatMobile, escapeHtml, debounce, icons } from "./utils.js";
 import { renderDataTableWrapper } from "../components/table.js";
 import { renderTableSkeleton } from "../components/loading.js";
@@ -88,7 +88,7 @@ export async function loadHistoryTable() {
       .from("intimation_calling")
       .select("*", { count: "exact" });
 
-    if (!isAdmin()) {
+    if (!hasAdminOrBsmAccess() && profile.cci_code) {
       query = query.eq("cci_code", profile.cci_code);
     }
 
@@ -215,7 +215,7 @@ async function exportIntimationCsv() {
 
   try {
     let q = supabase.from("intimation_calling").select("*").order("created_at", { ascending: false }).limit(2000);
-    if (!isAdmin()) q = q.eq("cci_code", profile.cci_code);
+    if (!hasAdminOrBsmAccess() && profile.cci_code) q = q.eq("cci_code", profile.cci_code);
     const { data, error } = await q;
     if (error) throw error;
 
