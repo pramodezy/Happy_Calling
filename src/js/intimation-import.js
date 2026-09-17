@@ -5,7 +5,7 @@
 
 import * as XLSX from "xlsx";
 import { supabase, formatSupabaseError } from "./supabase.js";
-import { icons, escapeHtml, formatDate, formatDateTime } from "./utils.js";
+import { icons, escapeHtml, formatDate, formatDateTime, parseFlexibleDate, cleanCellVal } from "./utils.js";
 import { showToast } from "../components/toast.js";
 import { renderSpinner } from "../components/loading.js";
 
@@ -180,49 +180,10 @@ function handleIncomingOpenCallsFile(file) {
 }
 
 /**
- * Parse date strings or Excel values into ISO-8601 string
+ * Parse date strings or Excel values into ISO-8601 string (handles 2-digit years, 4-digit years, ISO strings, AM/PM)
  */
 function parseDateTimeVal(rawVal) {
-  if (!rawVal) return null;
-
-  if (rawVal instanceof Date) {
-    return isNaN(rawVal.getTime()) ? null : rawVal.toISOString();
-  }
-
-  if (typeof rawVal === "number" && !isNaN(rawVal)) {
-    const jsDate = new Date(Math.round((rawVal - 25569) * 86400 * 1000));
-    return isNaN(jsDate.getTime()) ? null : jsDate.toISOString();
-  }
-
-  if (typeof rawVal === "string") {
-    const trimmed = rawVal.trim();
-    if (!trimmed) return null;
-
-    // DD/MM/YYYY or DD-MM-YYYY (e.g. 17/04/2026 15:36:45)
-    const ddmmyyyy = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?(?:\s*(AM|PM))?$/i;
-    const match = trimmed.match(ddmmyyyy);
-    if (match) {
-      let day = parseInt(match[1], 10);
-      let month = parseInt(match[2], 10) - 1;
-      let year = parseInt(match[3], 10);
-      let hour = match[4] ? parseInt(match[4], 10) : 0;
-      let min = match[5] ? parseInt(match[5], 10) : 0;
-      let sec = match[6] ? parseInt(match[6], 10) : 0;
-      const ampm = match[7] ? match[7].toUpperCase() : null;
-
-      if (ampm === "PM" && hour < 12) hour += 12;
-      if (ampm === "AM" && hour === 12) hour = 0;
-
-      const d = new Date(year, month, day, hour, min, sec);
-      if (!isNaN(d.getTime())) return d.toISOString();
-    }
-
-    // YYYY-MM-DD or ISO
-    const fallback = new Date(trimmed);
-    if (!isNaN(fallback.getTime())) return fallback.toISOString();
-  }
-
-  return null;
+  return parseFlexibleDate(rawVal, false);
 }
 
 /**
@@ -280,8 +241,8 @@ function mapAndPreviewOpenCalls(rawRows) {
   let qualifiedAgeingCount = 0;
 
   parsedCalls = rawRows.map((row, idx) => {
-    const rawSo = String(row[soKey] || "").trim();
-    const rawStationCode = String(row[stationCodeKey] || "").trim();
+    const rawSo = cleanCellVal(row[soKey]);
+    const rawStationCode = cleanCellVal(row[stationCodeKey]);
     // Normalize station code: e.g. "070" -> "70" or preserve exact match
     let cleanCode = rawStationCode.replace(/^0+/, "");
     if (!cleanCode) cleanCode = rawStationCode;
@@ -301,23 +262,23 @@ function mapAndPreviewOpenCalls(rawRows) {
       service_order: rawSo,
       station_code: rawStationCode,
       cci_code: cleanCode,
-      station_name: String(row[stationNameKey] || "").trim() || `Motorola Service ${cleanCode}`,
-      customer_name: String(row[custNameKey] || "").trim() || "Customer",
-      customer_mobile: String(row[custPhoneKey] || "").trim(),
-      alternate_mobile: String(row[altPhoneKey] || "").trim(),
-      model: String(row[modelKey] || "").trim(),
-      so_status: String(row[soStatusKey] || "").trim(),
-      warranty_status: String(row[warrantyKey] || "").trim(),
-      parts_status: String(row[partsKey] || "").trim(),
-      doa_status: String(row[doaKey] || "").trim(),
+      station_name: cleanCellVal(row[stationNameKey]) || `Motorola Service ${cleanCode}`,
+      customer_name: cleanCellVal(row[custNameKey]) || "Customer",
+      customer_mobile: cleanCellVal(row[custPhoneKey]),
+      alternate_mobile: cleanCellVal(row[altPhoneKey]),
+      model: cleanCellVal(row[modelKey]),
+      so_status: cleanCellVal(row[soStatusKey]),
+      warranty_status: cleanCellVal(row[warrantyKey]),
+      parts_status: cleanCellVal(row[partsKey]),
+      doa_status: cleanCellVal(row[doaKey]),
       carry_in_time: carryInIso,
       finish_repair_time: finishRepairIso,
       ageing_days: ageingDays,
       is_over_3_days: isOver3Days,
       source_data: {
-        region: String(row[regionKey] || "").trim(),
-        state: String(row[stateKey] || "").trim(),
-        city: String(row[cityKey] || "").trim(),
+        region: cleanCellVal(row[regionKey]),
+        state: cleanCellVal(row[stateKey]),
+        city: cleanCellVal(row[cityKey]),
       },
     };
   }).filter((c) => c.service_order && c.cci_code);

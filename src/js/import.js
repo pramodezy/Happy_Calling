@@ -4,7 +4,7 @@
 
 import * as XLSX from "xlsx";
 import { supabase, formatSupabaseError } from "./supabase.js";
-import { icons, escapeHtml, formatDate, formatDateTime } from "./utils.js";
+import { icons, escapeHtml, formatDate, formatDateTime, parseFlexibleDate, cleanCellVal } from "./utils.js";
 import { showToast } from "../components/toast.js";
 import { renderSpinner } from "../components/loading.js";
 import { openModal, closeModal } from "../components/modal.js";
@@ -224,53 +224,10 @@ function handleIncomingFile(file) {
 }
 
 /**
- * Safely parse date from Excel/CSV (handles Excel serial numbers, Date objects, and formats like DD/MM/YYYY, YYYY-MM-DD, with time)
+ * Safely parse date from Excel/CSV (handles 2-digit years, 4-digit years, ISO strings, AM/PM, and serial dates)
  */
 function parseClosureDate(rawVal) {
-  if (!rawVal) return new Date().toISOString();
-
-  // If already a JS Date object
-  if (rawVal instanceof Date) {
-    if (!isNaN(rawVal.getTime())) return rawVal.toISOString();
-    return new Date().toISOString();
-  }
-
-  // If numeric Excel timestamp (e.g. 45548.697)
-  if (typeof rawVal === "number" && !isNaN(rawVal)) {
-    const jsDate = new Date(Math.round((rawVal - 25569) * 86400 * 1000));
-    if (!isNaN(jsDate.getTime())) return jsDate.toISOString();
-  }
-
-  // If string
-  if (typeof rawVal === "string") {
-    const trimmed = rawVal.trim();
-    if (!trimmed) return new Date().toISOString();
-
-    // Check for DD/MM/YYYY or DD-MM-YYYY (e.g. 13/09/2026 18:30:00 or 13-09-2026 06:30 PM)
-    const ddmmyyyyRegex = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?(?:\s*(AM|PM))?$/i;
-    const match = trimmed.match(ddmmyyyyRegex);
-    if (match) {
-      let day = parseInt(match[1], 10);
-      let month = parseInt(match[2], 10) - 1; // 0-indexed month
-      let year = parseInt(match[3], 10);
-      let hour = match[4] ? parseInt(match[4], 10) : 0;
-      let min = match[5] ? parseInt(match[5], 10) : 0;
-      let sec = match[6] ? parseInt(match[6], 10) : 0;
-      const ampm = match[7] ? match[7].toUpperCase() : null;
-
-      if (ampm === "PM" && hour < 12) hour += 12;
-      if (ampm === "AM" && hour === 12) hour = 0;
-
-      const parsed = new Date(year, month, day, hour, min, sec);
-      if (!isNaN(parsed.getTime())) return parsed.toISOString();
-    }
-
-    // Try standard JavaScript Date parser (handles YYYY-MM-DD, ISO-8601, etc.)
-    const fallback = new Date(trimmed);
-    if (!isNaN(fallback.getTime())) return fallback.toISOString();
-  }
-
-  return new Date().toISOString();
+  return parseFlexibleDate(rawVal, true);
 }
 
 /**
@@ -501,16 +458,16 @@ function mapAndPreviewRows(rawRows) {
   );
 
   parsedClosures = rawRows.map((r) => {
-    const soNumber = String((detectedSoKey && r[detectedSoKey]) || "").trim();
+    const soNumber = cleanCellVal(detectedSoKey && r[detectedSoKey]);
     // Use detected closure_id, or fall back to SO Number if no separate Closure ID column exists
-    const rawClosureId = String((detectedClosureIdKey && r[detectedClosureIdKey]) || "").trim();
+    const rawClosureId = cleanCellVal(detectedClosureIdKey && r[detectedClosureIdKey]);
     const closureId = rawClosureId || soNumber;
 
-    const cciCode = String((detectedCciKey && r[detectedCciKey]) || "").trim().toUpperCase();
-    const cciName = String((detectedCciNameKey && r[detectedCciNameKey]) || cciCode).trim();
-    const customerName = String((detectedNameKey && r[detectedNameKey]) || "Valued Customer").trim();
-    const customerMobile = String((detectedMobileKey && r[detectedMobileKey]) || "N/A").trim();
-    const model = String((detectedModelKey && r[detectedModelKey]) || "Motorola Device").trim();
+    const cciCode = cleanCellVal(detectedCciKey && r[detectedCciKey]).toUpperCase();
+    const cciName = cleanCellVal(detectedCciNameKey && r[detectedCciNameKey]) || cciCode;
+    const customerName = cleanCellVal(detectedNameKey && r[detectedNameKey]) || "Valued Customer";
+    const customerMobile = cleanCellVal(detectedMobileKey && r[detectedMobileKey]) || "N/A";
+    const model = cleanCellVal(detectedModelKey && r[detectedModelKey]) || "Motorola Device";
     
     // Extract closure date from "SO Close Time"
     const rawClosureDate = detectedDateKey ? r[detectedDateKey] : null;
@@ -522,8 +479,8 @@ function mapAndPreviewRows(rawRows) {
     const rawCreationDate = detectedRepairCreationKey ? r[detectedRepairCreationKey] : null;
     const creationDateIso = rawCreationDate ? parseClosureDate(rawCreationDate) : null;
 
-    const warrantyStatus = detectedWarrantyKey ? String(r[detectedWarrantyKey] || "").trim() : null;
-    const repairType = detectedRepairTypeKey ? String(r[detectedRepairTypeKey] || "").trim() : null;
+    const warrantyStatus = detectedWarrantyKey ? cleanCellVal(r[detectedWarrantyKey]) : null;
+    const repairType = detectedRepairTypeKey ? cleanCellVal(r[detectedRepairTypeKey]) : null;
 
     return {
       closure_id: closureId,

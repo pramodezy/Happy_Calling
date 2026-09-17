@@ -34,3 +34,7 @@ service-account.json
 
 # Supabase local generated files
 .supabase/
+
+# Local test data
+Test/
+

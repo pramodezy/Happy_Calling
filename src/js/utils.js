@@ -33,6 +33,98 @@ export function formatDate(dateInput) {
 }
 
 /**
+ * Strip Excel formula wrapping (e.g. ="578004" -> 578004) and quotes
+ */
+export function cleanCellVal(val) {
+  if (val === null || val === undefined) return "";
+  let s = String(val).trim();
+  if (s.startsWith('="') && s.endsWith('"')) {
+    s = s.slice(2, -1);
+  }
+  return s.replace(/^["']+|["']+$/g, "").trim();
+}
+
+/**
+ * Robust date parser for Motorola CSV/Excel files:
+ * 1. DD/MM/YYYY or DD/MM/YY (supports 2-digit years like 10/09/26 19:22 -> 2026)
+ * 2. ISO 8601 strings (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS) - Motorola original dump
+ * 3. 12-hour format with AM/PM (e.g. "12/09/2026  7:21:00 PM")
+ * 4. Excel serial numbers (e.g. 45548.697)
+ * 5. JavaScript Date objects
+ */
+export function parseFlexibleDate(rawVal, fallbackToNow = false) {
+  if (rawVal === null || rawVal === undefined || rawVal === "") {
+    return fallbackToNow ? new Date().toISOString() : null;
+  }
+
+  // 1. If already a valid Date object
+  if (rawVal instanceof Date) {
+    if (!isNaN(rawVal.getTime())) return rawVal.toISOString();
+    return fallbackToNow ? new Date().toISOString() : null;
+  }
+
+  // 2. If numeric Excel timestamp (e.g. 46275.8075)
+  if (typeof rawVal === "number" && !isNaN(rawVal)) {
+    const jsDate = new Date(Math.round((rawVal - 25569) * 86400 * 1000));
+    if (!isNaN(jsDate.getTime())) return jsDate.toISOString();
+  }
+
+  // 3. If string
+  if (typeof rawVal === "string") {
+    let trimmed = cleanCellVal(rawVal);
+    if (!trimmed) return fallbackToNow ? new Date().toISOString() : null;
+
+    // A. Priority 1: DD/MM/YYYY or DD/MM/YY (Indian standard & Excel local format)
+    // Matches: "10/09/26 19:22", "12/09/26 19:21", "10/09/2026 19:22:55", "12/09/2026  7:21:00 PM", "12-09-2026"
+    const ddmmyyRegex = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2}|\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?(?:\s*(AM|PM))?$/i;
+    const match = trimmed.match(ddmmyyRegex);
+    if (match) {
+      let day = parseInt(match[1], 10);
+      let month = parseInt(match[2], 10) - 1; // 0-indexed month (0 = Jan, 8 = Sep, 11 = Dec)
+      let rawYear = parseInt(match[3], 10);
+      // Auto-expand 2-digit years: 26 -> 2026
+      let year = rawYear < 100 ? (rawYear >= 70 ? 1900 + rawYear : 2000 + rawYear) : rawYear;
+      let hour = match[4] ? parseInt(match[4], 10) : 0;
+      let min = match[5] ? parseInt(match[5], 10) : 0;
+      let sec = match[6] ? parseInt(match[6], 10) : 0;
+      const ampm = match[7] ? match[7].toUpperCase() : null;
+
+      if (ampm === "PM" && hour < 12) hour += 12;
+      if (ampm === "AM" && hour === 12) hour = 0;
+
+      const parsed = new Date(year, month, day, hour, min, sec);
+      if (!isNaN(parsed.getTime())) return parsed.toISOString();
+    }
+
+    // B. Priority 2: YYYY-MM-DD or YYYY/MM/DD with optional time (Motorola CRM default ISO export)
+    // Matches: "2026-09-10 19:22:55", "2026-07-30 18:25:23", "2026-09-10"
+    const yyyymmddRegex = /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?(?:\s*(AM|PM))?$/i;
+    const ymatch = trimmed.match(yyyymmddRegex);
+    if (ymatch) {
+      let year = parseInt(ymatch[1], 10);
+      let month = parseInt(ymatch[2], 10) - 1;
+      let day = parseInt(ymatch[3], 10);
+      let hour = ymatch[4] ? parseInt(ymatch[4], 10) : 0;
+      let min = ymatch[5] ? parseInt(ymatch[5], 10) : 0;
+      let sec = ymatch[6] ? parseInt(ymatch[6], 10) : 0;
+      const ampm = ymatch[7] ? ymatch[7].toUpperCase() : null;
+
+      if (ampm === "PM" && hour < 12) hour += 12;
+      if (ampm === "AM" && hour === 12) hour = 0;
+
+      const parsed = new Date(year, month, day, hour, min, sec);
+      if (!isNaN(parsed.getTime())) return parsed.toISOString();
+    }
+
+    // C. Fallback: Standard JavaScript Date parser (for ISO-8601 timestamps, etc.)
+    const fallback = new Date(trimmed);
+    if (!isNaN(fallback.getTime())) return fallback.toISOString();
+  }
+
+  return fallbackToNow ? new Date().toISOString() : null;
+}
+
+/**
  * Calculate ageing days between given date and today
  */
 export function calculateAgeingDays(dateInput) {
