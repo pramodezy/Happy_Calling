@@ -95,31 +95,6 @@ export async function renderPendingPage(container) {
     loadPendingTable();
   });
 
-  // Attach Delegated Pagination Listener to container so clicks always register
-  container.addEventListener("click", (e) => {
-    const nextBtn = e.target.closest("#btn-page-next, #btn-next-page, [data-action='next-page']");
-    if (nextBtn) {
-      e.preventDefault();
-      if (!nextBtn.disabled && !nextBtn.hasAttribute("disabled")) {
-        currentPage++;
-        loadPendingTable();
-        document.getElementById("pending-table-container")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-      return;
-    }
-
-    const prevBtn = e.target.closest("#btn-page-prev, #btn-prev-page, [data-action='prev-page']");
-    if (prevBtn) {
-      e.preventDefault();
-      if (!prevBtn.disabled && !prevBtn.hasAttribute("disabled") && currentPage > 1) {
-        currentPage--;
-        loadPendingTable();
-        document.getElementById("pending-table-container")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-      return;
-    }
-  });
-
   await loadPendingSummaryKpis();
   await loadPendingTable();
 }
@@ -426,20 +401,20 @@ export async function loadPendingTable() {
 
     const totalPages = Math.max(1, Math.ceil(totalRecords / PAGE_SIZE));
 
-    // Reattach Pagination Listeners (supports both ID patterns)
-    tableMount.querySelector("#btn-page-prev, #btn-prev-page, [data-action='prev-page']")?.addEventListener("click", () => {
+    // Reattach Pagination Listeners (1-by-1 page navigation, zero scroll jumping)
+    tableMount.querySelector("#btn-page-prev, #btn-prev-page, [data-action='prev-page']")?.addEventListener("click", (e) => {
+      e.preventDefault();
       if (currentPage > 1) {
         currentPage--;
         loadPendingTable();
-        tableMount.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     });
 
-    tableMount.querySelector("#btn-page-next, #btn-next-page, [data-action='next-page']")?.addEventListener("click", () => {
+    tableMount.querySelector("#btn-page-next, #btn-next-page, [data-action='next-page']")?.addEventListener("click", (e) => {
+      e.preventDefault();
       if (currentPage < totalPages) {
         currentPage++;
         loadPendingTable();
-        tableMount.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     });
 
