@@ -3,7 +3,7 @@
 // Overview of open calls ageing, SLA compliance, and customer ETR intimation
 // ============================================================================
 
-import { supabase } from "./supabase.js";
+import { supabase, fetchAllRows } from "./supabase.js";
 import { getCurrentProfile, isAdmin, isBSM, hasAdminOrBsmAccess } from "./auth.js";
 import { icons, escapeHtml, formatDate, formatDateTime } from "./utils.js";
 import { renderSpinner } from "../components/loading.js";
@@ -90,13 +90,18 @@ async function loadIntimationDashboardData(container) {
     const fiveDaysAgoIso = new Date(nowMs - 5 * 24 * 60 * 60 * 1000).toISOString();
     const sevenDaysAgoIso = new Date(nowMs - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    // Query 1: Open Calls base query
-    let openCallsQuery = supabase.from("open_calls_master").select("id, service_order, carry_in_time, cci_code").eq("is_open", true);
-    if (!hasAdminOrBsmAccess() && cciCode) {
-      openCallsQuery = openCallsQuery.eq("cci_code", cciCode);
-    }
-    const { data: openCalls, error: openErr } = await openCallsQuery;
-    if (openErr) throw openErr;
+    // Query 1: Open Calls base query - paginated to overcome PostgREST default 1,000-row limit
+    const openCalls = await fetchAllRows((from, to) => {
+      let q = supabase
+        .from("open_calls_master")
+        .select("id, service_order, carry_in_time, cci_code")
+        .eq("is_open", true)
+        .range(from, to);
+      if (!hasAdminOrBsmAccess() && cciCode) {
+        q = q.eq("cci_code", cciCode);
+      }
+      return q;
+    });
 
     const totalOpen = (openCalls || []).length;
     let count3to5 = 0;
@@ -115,13 +120,17 @@ async function loadIntimationDashboardData(container) {
       }
     });
 
-    // Query 2: Intimation calling stats
-    let intimQuery = supabase.from("intimation_calling").select("id, service_order, etr_date, calling_status, created_at, cci_code");
-    if (!hasAdminOrBsmAccess() && cciCode) {
-      intimQuery = intimQuery.eq("cci_code", cciCode);
-    }
-    const { data: intimations, error: intimErr } = await intimQuery;
-    if (intimErr) throw intimErr;
+    // Query 2: Intimation calling stats - paginated to ensure full coverage
+    const intimations = await fetchAllRows((from, to) => {
+      let q = supabase
+        .from("intimation_calling")
+        .select("id, service_order, etr_date, calling_status, created_at, cci_code")
+        .range(from, to);
+      if (!hasAdminOrBsmAccess() && cciCode) {
+        q = q.eq("cci_code", cciCode);
+      }
+      return q;
+    });
 
     const totalIntimated = (intimations || []).filter((i) => i.calling_status === "Completed").length;
     const pendingIntimationCount = Math.max(0, totalCriticalOver3d - totalIntimated);

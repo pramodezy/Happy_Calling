@@ -4,7 +4,7 @@
 // ETR expiry tracking, and 3-ETA re-intimation alert indicators
 // ============================================================================
 
-import { supabase, formatSupabaseError } from "./supabase.js";
+import { supabase, formatSupabaseError, fetchAllRows } from "./supabase.js";
 import { getCurrentProfile, isAdmin, hasAdminOrBsmAccess } from "./auth.js";
 import { formatMobile, formatDate, formatDateTime, calculateAgeingDays, renderAgeingBadge, escapeHtml, debounce, icons } from "./utils.js";
 import { renderDataTableWrapper } from "../components/table.js";
@@ -121,12 +121,17 @@ async function loadIntimationKpiMetrics() {
     const nowMs = Date.now();
     const threeDaysAgoIso = new Date(nowMs - 3 * 24 * 60 * 60 * 1000).toISOString();
 
-    let openQuery = supabase.from("open_calls_master").select("id, service_order, carry_in_time, current_etr_date, eta_count").eq("is_open", true);
-    if (!hasAdminOrBsmAccess() && profile.cci_code) {
-      openQuery = openQuery.eq("cci_code", profile.cci_code);
-    }
-    const { data: openRows } = await openQuery;
-    const activeCalls = openRows || [];
+    const activeCalls = await fetchAllRows((from, to) => {
+      let q = supabase
+        .from("open_calls_master")
+        .select("id, service_order, carry_in_time, current_etr_date, eta_count")
+        .eq("is_open", true)
+        .range(from, to);
+      if (!hasAdminOrBsmAccess() && profile.cci_code) {
+        q = q.eq("cci_code", profile.cci_code);
+      }
+      return q;
+    });
 
     totalOpen = activeCalls.length;
     criticalBacklog = activeCalls.filter((c) => new Date(c.carry_in_time).getTime() <= (nowMs - 3 * 24 * 60 * 60 * 1000)).length;

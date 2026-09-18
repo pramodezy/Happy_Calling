@@ -3,7 +3,7 @@
 // Displays historical customer intimation records and committed ETR dates
 // ============================================================================
 
-import { supabase, formatSupabaseError } from "./supabase.js";
+import { supabase, formatSupabaseError, fetchAllRows } from "./supabase.js";
 import { getCurrentProfile, isAdmin, hasAdminOrBsmAccess } from "./auth.js";
 import { formatDate, formatDateTime, formatMobile, escapeHtml, debounce, icons } from "./utils.js";
 import { renderDataTableWrapper } from "../components/table.js";
@@ -214,10 +214,15 @@ async function exportIntimationCsv() {
   if (!profile) return;
 
   try {
-    let q = supabase.from("intimation_calling").select("*").order("created_at", { ascending: false }).limit(2000);
-    if (!hasAdminOrBsmAccess() && profile.cci_code) q = q.eq("cci_code", profile.cci_code);
-    const { data, error } = await q;
-    if (error) throw error;
+    const data = await fetchAllRows((from, to) => {
+      let q = supabase
+        .from("intimation_calling")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .range(from, to);
+      if (!hasAdminOrBsmAccess() && profile.cci_code) q = q.eq("cci_code", profile.cci_code);
+      return q;
+    });
 
     if (!data || data.length === 0) {
       alert("No intimation records to export.");

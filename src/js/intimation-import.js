@@ -4,7 +4,7 @@
 // ============================================================================
 
 import * as XLSX from "xlsx";
-import { supabase, formatSupabaseError } from "./supabase.js";
+import { supabase, formatSupabaseError, fetchAllRows } from "./supabase.js";
 import { icons, escapeHtml, formatDate, formatDateTime, parseFlexibleDate, cleanCellVal } from "./utils.js";
 import { showToast } from "../components/toast.js";
 import { renderSpinner } from "../components/loading.js";
@@ -515,15 +515,17 @@ async function loadCurrentSnapshotStats() {
   if (!mount) return;
 
   try {
-    const [totalRes, over3dRes, cciCountRes] = await Promise.all([
+    const [totalRes, over3dRes, cciRows] = await Promise.all([
       supabase.from("open_calls_master").select("id", { count: "exact", head: true }).eq("is_open", true),
       supabase.from("open_calls_master").select("id", { count: "exact", head: true }).eq("is_open", true).lte("carry_in_time", new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()),
-      supabase.from("open_calls_master").select("cci_code").eq("is_open", true),
+      fetchAllRows((from, to) =>
+        supabase.from("open_calls_master").select("cci_code").eq("is_open", true).range(from, to)
+      ),
     ]);
 
     const totalOpen = totalRes.count || 0;
     const over3d = over3dRes.count || 0;
-    const distinctCcis = new Set((cciCountRes.data || []).map((d) => d.cci_code)).size;
+    const distinctCcis = new Set((cciRows || []).map((d) => d.cci_code)).size;
 
     mount.innerHTML = `
       <div class="kpi-card" style="padding:1.25rem;">

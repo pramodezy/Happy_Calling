@@ -131,3 +131,25 @@ export function cleanupAllSubscriptions() {
   }
   activeChannels.clear();
 }
+
+/**
+ * Fetch all rows across pages when a query might exceed PostgREST's default 1,000-row limit.
+ * @param {Function} buildQuery Function returning a Supabase query builder for a given range: (from, to) => query
+ * @param {number} pageSize Batch size per request (default: 1000)
+ * @returns {Promise<Array>} Combined array of all fetched records
+ */
+export async function fetchAllRows(buildQuery, pageSize = 1000) {
+  let allRows = [];
+  let from = 0;
+  while (true) {
+    const q = buildQuery(from, from + pageSize - 1);
+    const { data, error } = await q;
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    allRows.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return allRows;
+}
+

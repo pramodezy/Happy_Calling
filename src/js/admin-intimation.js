@@ -3,7 +3,7 @@
 // Station-wise monitoring, SLA compliance, and open calls management
 // ============================================================================
 
-import { supabase } from "./supabase.js";
+import { supabase, fetchAllRows } from "./supabase.js";
 import { isAdmin, isBSM, getUserAssignedRegions } from "./auth.js";
 import { icons, escapeHtml, formatDate, formatDateTime } from "./utils.js";
 import { renderSpinner } from "../components/loading.js";
@@ -91,20 +91,22 @@ async function loadStationData() {
     const nowMs = Date.now();
     const threeDaysAgoIso = new Date(nowMs - 3 * 24 * 60 * 60 * 1000).toISOString();
 
-    // Query active open calls
-    const { data: openCalls, error: openErr } = await supabase
-      .from("open_calls_master")
-      .select("service_order, station_code, cci_code, station_name, carry_in_time")
-      .eq("is_open", true);
+    // Query active open calls - paginated to overcome PostgREST default 1,000-row limit
+    const openCalls = await fetchAllRows((from, to) =>
+      supabase
+        .from("open_calls_master")
+        .select("service_order, station_code, cci_code, station_name, carry_in_time")
+        .eq("is_open", true)
+        .range(from, to)
+    );
 
-    if (openErr) throw openErr;
-
-    // Query intimation calling logs
-    const { data: intimations, error: intimErr } = await supabase
-      .from("intimation_calling")
-      .select("service_order, cci_code, calling_status");
-
-    if (intimErr) throw intimErr;
+    // Query intimation calling logs - paginated to ensure full coverage
+    const intimations = await fetchAllRows((from, to) =>
+      supabase
+        .from("intimation_calling")
+        .select("service_order, cci_code, calling_status")
+        .range(from, to)
+    );
 
     // Build lookup for intimation status
     const completedIntimationSoSet = new Set(

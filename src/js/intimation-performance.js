@@ -3,7 +3,7 @@
 // Tracks ETR commitments, SLA coverage, on-time resolution, and ETA extensions
 // ============================================================================
 
-import { supabase } from "./supabase.js";
+import { supabase, fetchAllRows } from "./supabase.js";
 import { getCurrentProfile, isAdmin, isBSM, hasAdminOrBsmAccess, getUserAssignedRegions } from "./auth.js";
 import { icons, escapeHtml, formatDate, formatDateTime } from "./utils.js";
 import { renderSpinner } from "../components/loading.js";
@@ -67,29 +67,29 @@ async function loadIntimationPerformanceData(container) {
     const nowMs = Date.now();
     const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
 
-    // 1. Fetch Open Calls inventory (active + recently resolved)
-    let openCallsQuery = supabase
-      .from("open_calls_master")
-      .select("service_order, station_code, cci_code, carry_in_time, finish_repair_time, current_etr_date, eta_count, is_open");
+    // 1. Fetch Open Calls inventory (active + recently resolved) - paginated to overcome 1000 row limit
+    const openCalls = await fetchAllRows((from, to) => {
+      let q = supabase
+        .from("open_calls_master")
+        .select("service_order, station_code, cci_code, carry_in_time, finish_repair_time, current_etr_date, eta_count, is_open")
+        .range(from, to);
+      if (!hasAdminOrBsmAccess() && cciCode) {
+        q = q.eq("cci_code", cciCode);
+      }
+      return q;
+    });
 
-    if (!hasAdminOrBsmAccess() && cciCode) {
-      openCallsQuery = openCallsQuery.eq("cci_code", cciCode);
-    }
-
-    const { data: openCalls, error: openErr } = await openCallsQuery;
-    if (openErr) throw openErr;
-
-    // 2. Fetch all intimation calling logs
-    let intimQuery = supabase
-      .from("intimation_calling")
-      .select("service_order, cci_code, etr_date, calling_status, eta_number, revision_reason, created_at");
-
-    if (!hasAdminOrBsmAccess() && cciCode) {
-      intimQuery = intimQuery.eq("cci_code", cciCode);
-    }
-
-    const { data: intimations, error: intimErr } = await intimQuery;
-    if (intimErr) throw intimErr;
+    // 2. Fetch all intimation calling logs - paginated to ensure full coverage
+    const intimations = await fetchAllRows((from, to) => {
+      let q = supabase
+        .from("intimation_calling")
+        .select("service_order, cci_code, etr_date, calling_status, eta_number, revision_reason, created_at")
+        .range(from, to);
+      if (!hasAdminOrBsmAccess() && cciCode) {
+        q = q.eq("cci_code", cciCode);
+      }
+      return q;
+    });
 
     const allCalls = openCalls || [];
     const allIntimations = intimations || [];
