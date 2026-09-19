@@ -8,6 +8,7 @@ import { formatDate, formatDateTime, calculateAgeingDays, renderAgeingBadge, for
 import { renderDataTableWrapper } from "../components/table.js";
 import { renderTableSkeleton, renderSpinner } from "../components/loading.js";
 import { renderKpiCard } from "../components/kpi-card.js";
+import { showToast } from "../components/toast.js";
 import { extractWarrantyAndRepair } from "./happy-calling.js";
 
 let currentPage = 1;
@@ -100,6 +101,43 @@ export async function renderPendingPage(container) {
 }
 
 /**
+ * Apply quick filter preset from pills or KPI cards
+ */
+export function applyQuickFilter(filterKey) {
+  currentPage = 1;
+  const ageingSelect = document.getElementById("pending-ageing-filter");
+  const attemptSelect = document.getElementById("pending-attempt-filter");
+
+  if (filterKey === "all" || filterKey === "ALL") {
+    currentAgeingFilter = "ALL";
+    currentAttemptFilter = "ALL";
+  } else if (filterKey === "fresh" || filterKey === "FRESH") {
+    currentAgeingFilter = "ALL";
+    currentAttemptFilter = "FRESH";
+  } else if (filterKey === "critical" || filterKey === "3PLUS") {
+    currentAgeingFilter = "3PLUS";
+    currentAttemptFilter = "ALL";
+  } else if (filterKey === "2days" || filterKey === "2DAYS") {
+    currentAgeingFilter = "2DAYS";
+    currentAttemptFilter = "ALL";
+  } else if (filterKey === "today" || filterKey === "TODAY") {
+    currentAgeingFilter = "TODAY";
+    currentAttemptFilter = "ALL";
+  } else if (filterKey === "not-reachable" || filterKey === "NOT_REACHABLE") {
+    currentAgeingFilter = "ALL";
+    currentAttemptFilter = "NOT_REACHABLE";
+  } else if (filterKey === "call-back" || filterKey === "CALL_BACK") {
+    currentAgeingFilter = "ALL";
+    currentAttemptFilter = "CALL_BACK";
+  }
+
+  if (ageingSelect) ageingSelect.value = currentAgeingFilter;
+  if (attemptSelect) attemptSelect.value = currentAttemptFilter;
+
+  loadPendingTable();
+}
+
+/**
  * Load summary KPIs for pending closures and attempted calling activities
  */
 async function loadPendingSummaryKpis() {
@@ -138,35 +176,50 @@ async function loadPendingSummaryKpis() {
     const freshCount = Math.max(0, totalPending - totalAttempted);
 
     kpiMount.innerHTML = `
-      ${renderKpiCard({
-        title: "Total Pending Calls",
-        value: totalPending.toLocaleString(),
-        icon: icons.clock,
-        colorScheme: "blue",
-        subtitle: "Awaiting Happy Calling",
-      })}
-      ${renderKpiCard({
-        title: "Fresh (Uncalled)",
-        value: freshCount.toLocaleString(),
-        icon: icons.checkCircle,
-        colorScheme: "green",
-        subtitle: "No Attempt Made Yet",
-      })}
-      ${renderKpiCard({
-        title: "Not Reachable",
-        value: notReachableCount.toLocaleString(),
-        icon: icons.alertTriangle,
-        colorScheme: "amber",
-        subtitle: "Switched off / Busy / No Reply",
-      })}
-      ${renderKpiCard({
-        title: "Call Back Required",
-        value: callBackCount.toLocaleString(),
-        icon: icons.phone,
-        colorScheme: "purple",
-        subtitle: "Customer Requested Later",
-      })}
+      <div class="kpi-filter-trigger" data-filter="all" style="cursor:pointer;" title="Click to filter by All Pending">
+        ${renderKpiCard({
+          title: "Total Pending Calls",
+          value: totalPending.toLocaleString(),
+          icon: icons.clock,
+          colorScheme: "blue",
+          subtitle: "Awaiting Happy Calling • Click to view",
+        })}
+      </div>
+      <div class="kpi-filter-trigger" data-filter="fresh" style="cursor:pointer;" title="Click to filter by Fresh Only">
+        ${renderKpiCard({
+          title: "Fresh (Uncalled)",
+          value: freshCount.toLocaleString(),
+          icon: icons.checkCircle,
+          colorScheme: "green",
+          subtitle: "No Attempt Made Yet • Click to view",
+        })}
+      </div>
+      <div class="kpi-filter-trigger" data-filter="not-reachable" style="cursor:pointer;" title="Click to filter by Not Reachable">
+        ${renderKpiCard({
+          title: "Not Reachable",
+          value: notReachableCount.toLocaleString(),
+          icon: icons.alertTriangle,
+          colorScheme: "amber",
+          subtitle: "Switched off / Busy / No Reply • Click to view",
+        })}
+      </div>
+      <div class="kpi-filter-trigger" data-filter="call-back" style="cursor:pointer;" title="Click to filter by Call Back Required">
+        ${renderKpiCard({
+          title: "Call Back Required",
+          value: callBackCount.toLocaleString(),
+          icon: icons.phone,
+          colorScheme: "purple",
+          subtitle: "Customer Requested Later • Click to view",
+        })}
+      </div>
     `;
+
+    kpiMount.querySelectorAll(".kpi-filter-trigger").forEach((card) => {
+      card.addEventListener("click", () => {
+        const filterType = card.getAttribute("data-filter");
+        applyQuickFilter(filterType);
+      });
+    });
   } catch (err) {
     console.warn("Could not load pending summary KPIs:", err);
   }
@@ -413,16 +466,44 @@ export async function loadPendingTable() {
             warrantyRepairPills += `</div>`;
           }
 
+          const cleanPhone = item.customer_mobile ? String(item.customer_mobile).replace(/\D/g, "") : "";
+          const telHref = cleanPhone ? `tel:${cleanPhone}` : "#";
+
           return `
           <tr>
-            <td><strong style="font-family:monospace; color:var(--text-primary);">${escapeHtml(item.closure_id)}</strong></td>
             <td>
-              <span style="font-family:monospace; color:var(--moto-blue-accent); font-weight:600;">${escapeHtml(item.so_number)}</span>
+              <div style="display:inline-flex; align-items:center; gap:2px;">
+                <strong style="font-family:monospace; color:var(--text-primary); font-size:0.8125rem;">${escapeHtml(item.closure_id)}</strong>
+                <button type="button" class="copy-btn-inline btn-copy-trigger" data-copy-text="${escapeHtml(item.closure_id)}" title="Copy Closure ID" aria-label="Copy Closure ID">
+                  <span style="width:13px; height:13px; display:inline-block;">${icons.copy}</span>
+                </button>
+              </div>
+            </td>
+            <td>
+              <div style="display:inline-flex; align-items:center; gap:2px;">
+                <span style="font-family:monospace; color:var(--moto-blue-accent); font-weight:600; font-size:0.8125rem;">${escapeHtml(item.so_number)}</span>
+                <button type="button" class="copy-btn-inline btn-copy-trigger" data-copy-text="${escapeHtml(item.so_number)}" title="Copy SO Number" aria-label="Copy SO Number">
+                  <span style="width:13px; height:13px; display:inline-block;">${icons.copy}</span>
+                </button>
+              </div>
               ${warrantyRepairPills}
             </td>
             <td>
               <div style="font-weight:600;">${escapeHtml(item.customer_name)}</div>
-              <div style="font-size:0.75rem; color:var(--text-tertiary);">${escapeHtml(formatMobile(item.customer_mobile))}</div>
+              <div style="display:inline-flex; align-items:center; gap:2px; margin-top:2px;">
+                <a href="${telHref}" style="font-size:0.75rem; color:var(--moto-blue-accent); font-family:monospace;" title="Click to dial">
+                  ${escapeHtml(formatMobile(item.customer_mobile))}
+                </a>
+                ${
+                  cleanPhone
+                    ? `
+                  <button type="button" class="copy-btn-inline btn-copy-trigger" data-copy-text="${escapeHtml(cleanPhone)}" title="Copy Phone Number" aria-label="Copy Phone" style="width:20px; height:20px; padding:2px;">
+                    <span style="width:11px; height:11px; display:inline-block;">${icons.copy}</span>
+                  </button>
+                `
+                    : ""
+                }
+              </div>
             </td>
             <td>${escapeHtml(item.model || "—")}</td>
             <td>${formatDate(item.closure_date)}</td>
@@ -440,9 +521,27 @@ export async function loadPendingTable() {
         .join("");
     }
 
+    const filterPillsData = [
+      { id: "all", label: "All Pending", active: currentAgeingFilter === "ALL" && currentAttemptFilter === "ALL" },
+      { id: "fresh", label: "🆕 Fresh (Uncalled)", active: currentAttemptFilter === "FRESH" },
+      { id: "critical", label: "🚨 3+ Days Critical", active: currentAgeingFilter === "3PLUS" },
+      { id: "2days", label: "⚠️ 2 Days", active: currentAgeingFilter === "2DAYS" },
+      { id: "today", label: "📅 Today", active: currentAgeingFilter === "TODAY" },
+      { id: "not-reachable", label: "⚠️ Not Reachable", active: currentAttemptFilter === "NOT_REACHABLE" },
+      { id: "call-back", label: "📞 Call Back", active: currentAttemptFilter === "CALL_BACK" },
+    ];
+
+    const filterPillsHtml = filterPillsData
+      .map(
+        (p) =>
+          `<button type="button" class="filter-pill ${p.active ? "active" : ""}" data-quick-filter="${p.id}">${p.label}</button>`
+      )
+      .join("");
+
     tableMount.innerHTML = renderDataTableWrapper({
       title: "Pending Closures",
       searchPlaceholder: "Search SO, Closure ID, Customer, Model...",
+      filterPillsHtml,
       columns: [
         { label: "Closure ID" },
         { label: "SO Number" },
@@ -460,6 +559,36 @@ export async function loadPendingTable() {
     });
 
     const totalPages = Math.max(1, Math.ceil(totalRecords / PAGE_SIZE));
+
+    // Attach Quick Filter Pills Listeners
+    tableMount.querySelectorAll("[data-quick-filter]").forEach((pill) => {
+      pill.addEventListener("click", () => {
+        const filterKey = pill.getAttribute("data-quick-filter");
+        applyQuickFilter(filterKey);
+      });
+    });
+
+    // Attach Inline Copy Listeners
+    tableMount.querySelectorAll(".btn-copy-trigger").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const text = btn.getAttribute("data-copy-text");
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+          btn.classList.add("copied");
+          btn.innerHTML = `<span style="width:13px; height:13px; display:inline-block;">${icons.check}</span>`;
+          showToast(`Copied ${text}`, "success");
+          setTimeout(() => {
+            btn.classList.remove("copied");
+            btn.innerHTML = `<span style="width:13px; height:13px; display:inline-block;">${icons.copy}</span>`;
+          }, 1800);
+        } catch {
+          showToast("Unable to copy", "warning");
+        }
+      });
+    });
 
     // Reattach Pagination Listeners (1-by-1 page navigation, zero scroll jumping)
     tableMount.querySelector("#btn-page-prev, #btn-prev-page, [data-action='prev-page']")?.addEventListener("click", (e) => {

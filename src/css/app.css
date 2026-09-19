@@ -715,34 +715,52 @@ input, select, textarea {
 
 .table-responsive-wrapper {
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 72vh;
   width: 100%;
+  position: relative;
+  border-radius: var(--radius-md);
 }
 
 .data-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   text-align: left;
-  font-size: 0.875rem;
+  font-size: 0.84375rem;
 }
 
 .data-table th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   background: var(--bg-surface-subtle);
-  padding: 0.75rem 1rem;
+  padding: 0.65rem 0.9rem;
   font-weight: 600;
+  font-size: 0.78125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
   color: var(--text-secondary);
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-medium);
+  box-shadow: inset 0 -1px 0 var(--border-medium);
   white-space: nowrap;
 }
 
 .data-table td {
-  padding: 0.875rem 1rem;
+  padding: 0.7rem 0.9rem;
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-primary);
   vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.data-table tbody tr {
+  transition: background-color var(--transition-fast);
 }
 
 .data-table tbody tr:hover {
-  background: #f8fafc;
+  background: #f1f5f9;
 }
 
 .data-table tbody tr:last-child td {
@@ -1256,4 +1274,180 @@ input, select, textarea {
   border-radius: var(--radius-sm);
   background: var(--bg-surface);
   font-size: 0.8125rem;
+}
+
+/* ============================================================================
+   ENTERPRISE UI/UX ENHANCEMENTS (UI-UX-PRO-MAX)
+   ============================================================================ */
+
+/* WCAG 2.2 AA Accessible Focus Rings */
+:focus-visible {
+  outline: 2px solid var(--moto-blue-accent);
+  outline-offset: 2px;
+}
+
+/* Quick Disposition Action Chips Bar */
+.quick-chips-wrapper {
+  margin-bottom: 1.25rem;
+  padding: 0.875rem 1rem;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+}
+
+.quick-chips-header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78125rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.65rem;
+}
+
+.quick-chips-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.btn-quick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-medium);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  transition: all var(--transition-fast);
+}
+
+.btn-quick-chip:hover {
+  border-color: var(--moto-blue-accent);
+  background: var(--moto-blue-light);
+  color: var(--moto-blue-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 114, 206, 0.15);
+}
+
+.btn-quick-chip:active {
+  transform: translateY(0);
+}
+
+.btn-quick-chip.chip-success:hover {
+  border-color: #10b981;
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.btn-quick-chip.chip-warning:hover {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.btn-quick-chip.chip-danger:hover {
+  border-color: #ef4444;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+/* Quick Filter Pills Bar */
+.filter-pills-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0.25rem 0;
+}
+
+.filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.78125rem;
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-subtle);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.filter-pill:hover {
+  border-color: var(--border-medium);
+  color: var(--text-primary);
+  background: #ffffff;
+}
+
+.filter-pill.active {
+  background: var(--moto-blue-accent);
+  color: #ffffff;
+  border-color: var(--moto-blue-accent);
+  box-shadow: 0 1px 3px rgba(0, 114, 206, 0.3);
+}
+
+.filter-pill .pill-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  font-size: 0.6875rem;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.08);
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-pill.active .pill-count {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Inline 1-Click Copy Button */
+.copy-btn-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  margin-left: 0.35rem;
+  vertical-align: middle;
+}
+
+.copy-btn-inline:hover {
+  color: var(--moto-blue-accent);
+  border-color: var(--moto-blue-accent);
+  background: var(--moto-blue-light);
+}
+
+.copy-btn-inline.copied {
+  color: #10b981;
+  border-color: #10b981;
+  background: #ecfdf5;
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

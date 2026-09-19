@@ -390,10 +390,21 @@ function renderCallingForm(mount, closure) {
       <div class="customer-meta-grid" style="margin-top:1.25rem;">
         <div class="customer-meta-item">
           <span class="meta-label">Customer Mobile</span>
-          <a href="${telHref}" class="customer-phone-highlight" title="Click to call">
-            <span style="width:20px; height:20px;">${icons.phone}</span>
-            <span>${escapeHtml(formattedPhone)}</span>
-          </a>
+          <div style="display:inline-flex; align-items:center; gap:4px;">
+            <a href="${telHref}" class="customer-phone-highlight" title="Click to call">
+              <span style="width:18px; height:18px;">${icons.phone}</span>
+              <span>${escapeHtml(formattedPhone)}</span>
+            </a>
+            ${
+              closure.customer_mobile
+                ? `
+              <button type="button" class="copy-btn-inline btn-copy-trigger" data-copy-text="${escapeHtml(closure.customer_mobile.replace(/\D/g, ""))}" title="Copy Mobile Number" aria-label="Copy Mobile Number">
+                <span style="width:13px; height:13px; display:inline-block;">${icons.copy}</span>
+              </button>
+            `
+                : ""
+            }
+          </div>
         </div>
 
         <div class="customer-meta-item">
@@ -403,7 +414,12 @@ function renderCallingForm(mount, closure) {
 
         <div class="customer-meta-item">
           <span class="meta-label">SO Number</span>
-          <span class="meta-value" style="font-family:monospace; color:var(--moto-blue-accent); font-weight:700;">${escapeHtml(closure.so_number)}</span>
+          <div style="display:inline-flex; align-items:center; gap:4px;">
+            <span class="meta-value" style="font-family:monospace; color:var(--moto-blue-accent); font-weight:700;">${escapeHtml(closure.so_number)}</span>
+            <button type="button" class="copy-btn-inline btn-copy-trigger" data-copy-text="${escapeHtml(closure.so_number)}" title="Copy SO Number" aria-label="Copy SO Number">
+              <span style="width:13px; height:13px; display:inline-block;">${icons.copy}</span>
+            </button>
+          </div>
         </div>
 
         <div class="customer-meta-item">
@@ -435,6 +451,36 @@ function renderCallingForm(mount, closure) {
       <input type="hidden" id="form-closure-id" value="${escapeHtml(closure.closure_id)}">
       <input type="hidden" id="form-so-number" value="${escapeHtml(closure.so_number)}">
       <input type="hidden" id="form-cci-code" value="${escapeHtml(closure.cci_code)}">
+
+      <!-- 1-Click Quick Dispositions Bar -->
+      <div class="quick-chips-wrapper">
+        <div class="quick-chips-header">
+          <span style="width:16px; height:16px;">${icons.zap}</span>
+          <span>1-Click Quick Dispositions</span>
+        </div>
+        <div class="quick-chips-grid">
+          <button type="button" class="btn-quick-chip chip-success" data-action-chip="quick-happy" title="Auto-fill 10/10 Happy response">
+            <span>😊</span>
+            <span>Customer Satisfied (10/10)</span>
+          </button>
+          <button type="button" class="btn-quick-chip chip-warning" data-action-chip="quick-ringing" title="Auto-fill Ringing / No Reply">
+            <span>🔔</span>
+            <span>Ringing / No Reply</span>
+          </button>
+          <button type="button" class="btn-quick-chip chip-warning" data-action-chip="quick-switched-off" title="Auto-fill Switched Off / Busy">
+            <span>📴</span>
+            <span>Switched Off / Busy</span>
+          </button>
+          <button type="button" class="btn-quick-chip" data-action-chip="quick-callback" title="Auto-fill Call Back Required">
+            <span>📞</span>
+            <span>Call Back Requested</span>
+          </button>
+          <button type="button" class="btn-quick-chip chip-danger" data-action-chip="quick-complaint" title="Auto-fill DSAT complaint">
+            <span>⚠️</span>
+            <span>DSAT / Complaint</span>
+          </button>
+        </div>
+      </div>
 
       <!-- 1. Calling Status -->
       <div class="form-group">
@@ -541,6 +587,89 @@ function attachFormEvents() {
     if (completedSection) {
       completedSection.style.display = isCompleted ? "block" : "none";
     }
+  });
+
+  // 1-Click Inline Copy Listeners
+  document.querySelectorAll(".btn-copy-trigger").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const text = btn.getAttribute("data-copy-text");
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.classList.add("copied");
+        btn.innerHTML = `<span style="width:13px; height:13px; display:inline-block;">${icons.check}</span>`;
+        showToast(`Copied ${text}`, "success");
+        setTimeout(() => {
+          btn.classList.remove("copied");
+          btn.innerHTML = `<span style="width:13px; height:13px; display:inline-block;">${icons.copy}</span>`;
+        }, 1800);
+      } catch {
+        showToast("Unable to copy", "warning");
+      }
+    });
+  });
+
+  // 1-Click Quick Dispositions Handling
+  document.querySelectorAll("[data-action-chip]").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const action = chip.getAttribute("data-action-chip");
+      const customerRemarks = document.getElementById("form-customer-remarks");
+      const cciRemarks = document.getElementById("form-cci-remarks");
+      const submitBtn = document.getElementById("btn-submit-call");
+
+      if (action === "quick-happy") {
+        statusSelect.value = "Completed";
+        if (completedSection) completedSection.style.display = "block";
+        feedbackInput.value = "Happy";
+        document.querySelectorAll(".feedback-option-card").forEach((c) => {
+          c.classList.toggle("selected", c.getAttribute("data-feedback") === "Happy");
+        });
+        setRatingValue(10);
+        if (customerRemarks && !customerRemarks.value) {
+          customerRemarks.value = "Customer verified handset repair and expressed full satisfaction.";
+        }
+        showToast("Auto-set 10/10 Happy response", "success");
+      } else if (action === "quick-ringing") {
+        statusSelect.value = "Customer Not Reachable";
+        if (completedSection) completedSection.style.display = "none";
+        if (cciRemarks && !cciRemarks.value) {
+          cciRemarks.value = "Customer call placed, phone kept ringing without response.";
+        }
+        showToast("Auto-set Ringing / No Reply", "info");
+      } else if (action === "quick-switched-off") {
+        statusSelect.value = "Customer Not Reachable";
+        if (completedSection) completedSection.style.display = "none";
+        if (cciRemarks && !cciRemarks.value) {
+          cciRemarks.value = "Customer number switched off / not reachable on network.";
+        }
+        showToast("Auto-set Switched Off", "info");
+      } else if (action === "quick-callback") {
+        statusSelect.value = "Call Back Required";
+        if (completedSection) completedSection.style.display = "none";
+        if (cciRemarks && !cciRemarks.value) {
+          cciRemarks.value = "Customer answered and requested a callback at a later time.";
+        }
+        showToast("Auto-set Call Back Requested", "info");
+      } else if (action === "quick-complaint") {
+        statusSelect.value = "Completed";
+        if (completedSection) completedSection.style.display = "block";
+        feedbackInput.value = "Unhappy";
+        document.querySelectorAll(".feedback-option-card").forEach((c) => {
+          c.classList.toggle("selected", c.getAttribute("data-feedback") === "Unhappy");
+        });
+        setRatingValue(3);
+        if (customerRemarks) {
+          customerRemarks.focus();
+        }
+        showToast("Auto-set DSAT - please enter customer issue", "warning");
+      }
+
+      if (submitBtn) {
+        submitBtn.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    });
   });
 
   // Feedback Category Pill Click

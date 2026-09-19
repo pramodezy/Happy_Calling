@@ -8,6 +8,7 @@ export function renderDataTableWrapper({
   title,
   searchPlaceholder = "Search...",
   actionsHtml = "",
+  filterPillsHtml = "",
   columns,
   rowsHtml,
   page = 1,
@@ -24,23 +25,26 @@ export function renderDataTableWrapper({
 
   return `
     <div class="table-card">
-      <div class="table-card-header">
-        <h3 class="table-card-title">${title}</h3>
-        <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
-          ${
-            searchPlaceholder
-              ? `
-            <div style="position:relative; width:220px;">
-              <span style="position:absolute; left:10px; top:50%; transform:translateY(-50%); width:16px; height:16px; color:var(--text-tertiary); pointer-events:none;">
-                ${icons.search}
-              </span>
-              <input type="text" id="table-search-input" class="form-input" style="padding-left:32px; padding-top:6px; padding-bottom:6px; font-size:0.8125rem;" placeholder="${searchPlaceholder}">
-            </div>
-          `
-              : ""
-          }
-          ${actionsHtml}
+      <div class="table-card-header" style="flex-direction:column; align-items:stretch; gap:0.75rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+          <h3 class="table-card-title">${title}</h3>
+          <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+            ${
+              searchPlaceholder
+                ? `
+              <div style="position:relative; width:240px;">
+                <span style="position:absolute; left:10px; top:50%; transform:translateY(-50%); width:16px; height:16px; color:var(--text-tertiary); pointer-events:none;">
+                  ${icons.search}
+                </span>
+                <input type="text" id="table-search-input" class="form-input" style="padding-left:32px; padding-top:6px; padding-bottom:6px; font-size:0.8125rem;" placeholder="${searchPlaceholder}">
+              </div>
+            `
+                : ""
+            }
+            ${actionsHtml}
+          </div>
         </div>
+        ${filterPillsHtml ? `<div class="filter-pills-bar">${filterPillsHtml}</div>` : ""}
       </div>
 
       <div class="table-responsive-wrapper">

@@ -38,3 +38,6 @@ service-account.json
 # Local test data
 Test/
 
+# Python virtual environment & local AI skills
+.venv/
+.agents/

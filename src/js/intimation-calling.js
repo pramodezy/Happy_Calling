@@ -407,18 +407,34 @@ function renderEtrWindow(mount, call) {
           <h3 style="font-size:1.35rem; font-weight:700; color:var(--text-primary); margin-top:0.25rem;">
             ${escapeHtml(call.customer_name || "Valued Motorola Customer")}
           </h3>
-          <div style="display:flex; align-items:center; gap:0.75rem; margin-top:0.5rem; flex-wrap:wrap;">
-            <a href="${telHref}" class="customer-phone-highlight" title="Click to call primary number" style="font-size:0.95rem;">
-              <span style="width:18px; height:18px;">${icons.phone}</span>
-              <span>${escapeHtml(formattedPhone)}</span>
-            </a>
+          <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.5rem; flex-wrap:wrap;">
+            <div style="display:inline-flex; align-items:center; gap:4px;">
+              <a href="${telHref}" class="customer-phone-highlight" title="Click to call primary number" style="font-size:0.95rem;">
+                <span style="width:18px; height:18px;">${icons.phone}</span>
+                <span>${escapeHtml(formattedPhone)}</span>
+              </a>
+              ${
+                call.primary_phone
+                  ? `
+                <button type="button" class="copy-btn-inline btn-copy-trigger" data-copy-text="${escapeHtml(String(call.primary_phone).replace(/\D/g, ""))}" title="Copy Phone Number" aria-label="Copy Phone Number">
+                  <span style="width:13px; height:13px; display:inline-block;">${icons.copy}</span>
+                </button>
+              `
+                  : ""
+              }
+            </div>
             ${
               altPhone
                 ? `
-              <a href="${altTelHref}" class="customer-phone-highlight" style="background:#f1f5f9; color:var(--text-secondary); border-color:#cbd5e1; font-size:0.875rem;" title="Click to call alternate number">
-                <span style="width:16px; height:16px;">${icons.phone}</span>
-                <span>Alt: ${escapeHtml(altPhone)}</span>
-              </a>
+              <div style="display:inline-flex; align-items:center; gap:4px;">
+                <a href="${altTelHref}" class="customer-phone-highlight" style="background:#f1f5f9; color:var(--text-secondary); border-color:#cbd5e1; font-size:0.875rem;" title="Click to call alternate number">
+                  <span style="width:16px; height:16px;">${icons.phone}</span>
+                  <span>Alt: ${escapeHtml(altPhone)}</span>
+                </a>
+                <button type="button" class="copy-btn-inline btn-copy-trigger" data-copy-text="${escapeHtml(String(altPhone).replace(/\D/g, ""))}" title="Copy Alternate Number" aria-label="Copy Alt Phone">
+                  <span style="width:13px; height:13px; display:inline-block;">${icons.copy}</span>
+                </button>
+              </div>
             `
                 : ""
             }
@@ -445,9 +461,14 @@ function renderEtrWindow(mount, call) {
           <!-- 1. Service Order -->
           <div class="customer-meta-item">
             <span class="meta-label">1. Service Order</span>
-            <span class="meta-value" style="font-family:monospace; color:var(--moto-blue-accent); font-weight:700; font-size:0.95rem;">
-              ${escapeHtml(call.service_order)}
-            </span>
+            <div style="display:inline-flex; align-items:center; gap:4px;">
+              <span class="meta-value" style="font-family:monospace; color:var(--moto-blue-accent); font-weight:700; font-size:0.95rem;">
+                ${escapeHtml(call.service_order)}
+              </span>
+              <button type="button" class="copy-btn-inline btn-copy-trigger" data-copy-text="${escapeHtml(call.service_order)}" title="Copy Service Order" aria-label="Copy Service Order">
+                <span style="width:13px; height:13px; display:inline-block;">${icons.copy}</span>
+              </button>
+            </div>
           </div>
 
           <!-- 2. Station Name -->
@@ -525,6 +546,32 @@ function renderEtrWindow(mount, call) {
         <span class="badge ${isMaxEtas ? 'badge-danger' : 'badge-info'}" style="font-size:0.75rem;">
           ${isMaxEtas ? 'Policy Capped' : `ETA #${currentEtaNum}`}
         </span>
+      </div>
+
+      <!-- 1-Click Quick Intimation Action Chips -->
+      <div class="quick-chips-wrapper">
+        <div class="quick-chips-header">
+          <span style="width:16px; height:16px;">${icons.zap}</span>
+          <span>1-Click Quick Dispositions</span>
+        </div>
+        <div class="quick-chips-grid">
+          <button type="button" class="btn-quick-chip chip-success" data-intimation-chip="quick-agreed" ${isMaxEtas ? "disabled" : ""} title="Auto-set Customer Intimated & Agreed">
+            <span>🤝</span>
+            <span>Customer Agreed to ETR</span>
+          </button>
+          <button type="button" class="btn-quick-chip chip-warning" data-intimation-chip="quick-ringing" title="Auto-set Ringing / No Reply">
+            <span>🔔</span>
+            <span>Ringing / No Reply</span>
+          </button>
+          <button type="button" class="btn-quick-chip chip-warning" data-intimation-chip="quick-switched-off" title="Auto-set Switched Off / Busy">
+            <span>📴</span>
+            <span>Switched Off / Busy</span>
+          </button>
+          <button type="button" class="btn-quick-chip" data-intimation-chip="quick-callback" title="Auto-set Call Back Later">
+            <span>📞</span>
+            <span>Call Back Requested</span>
+          </button>
+        </div>
       </div>
 
       <!-- Calling Reachability Status -->
@@ -656,6 +703,77 @@ function renderEtrWindow(mount, call) {
       </div>
     </form>
   `;
+
+  // 1-Click Inline Copy Listeners
+  mount.querySelectorAll(".btn-copy-trigger").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const text = btn.getAttribute("data-copy-text");
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.classList.add("copied");
+        btn.innerHTML = `<span style="width:13px; height:13px; display:inline-block;">${icons.check}</span>`;
+        showToast(`Copied ${text}`, "success");
+        setTimeout(() => {
+          btn.classList.remove("copied");
+          btn.innerHTML = `<span style="width:13px; height:13px; display:inline-block;">${icons.copy}</span>`;
+        }, 1800);
+      } catch {
+        showToast("Unable to copy", "warning");
+      }
+    });
+  });
+
+  // 1-Click Quick Intimation Action Chips
+  mount.querySelectorAll("[data-intimation-chip]").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const action = chip.getAttribute("data-intimation-chip");
+      const statusRadios = mount.querySelectorAll('input[name="intimation-status"]');
+      const cciComment = mount.querySelector("#input-cci-comment");
+      const customerComment = mount.querySelector("#input-customer-comment");
+      const submitBtn = mount.querySelector("#btn-submit-intimation");
+
+      if (action === "quick-agreed") {
+        statusRadios.forEach((r) => {
+          if (r.value === "Completed") r.checked = true;
+        });
+        if (customerComment && !customerComment.value) {
+          customerComment.value = "Customer verified current repair stage and accepted projected ETR.";
+        }
+        showToast("Auto-set Customer Agreed to ETR", "success");
+      } else if (action === "quick-ringing") {
+        statusRadios.forEach((r) => {
+          if (r.value === "Customer Not Reachable") r.checked = true;
+        });
+        if (cciComment && !cciComment.value) {
+          cciComment.value = "Call placed to customer, phone kept ringing without response.";
+        }
+        showToast("Auto-set Ringing / No Reply", "info");
+      } else if (action === "quick-switched-off") {
+        statusRadios.forEach((r) => {
+          if (r.value === "Customer Not Reachable") r.checked = true;
+        });
+        if (cciComment && !cciComment.value) {
+          cciComment.value = "Customer primary mobile switched off / out of coverage.";
+        }
+        showToast("Auto-set Switched Off", "info");
+      } else if (action === "quick-callback") {
+        statusRadios.forEach((r) => {
+          if (r.value === "Call Back Required") r.checked = true;
+        });
+        if (cciComment && !cciComment.value) {
+          cciComment.value = "Spoke briefly with customer, requested callback later today.";
+        }
+        showToast("Auto-set Call Back Requested", "info");
+      }
+
+      if (submitBtn) {
+        submitBtn.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    });
+  });
 
   // Quick ETR Date helper buttons
   mount.querySelectorAll(".btn-quick-etr").forEach((btn) => {
