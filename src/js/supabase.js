@@ -14,8 +14,20 @@ const getEnvVar = (key) => {
   return null;
 };
 
-const SUPABASE_URL = getEnvVar("VITE_SUPABASE_URL") || "";
-const SUPABASE_ANON_KEY = getEnvVar("VITE_SUPABASE_ANON_KEY") || "";
+// Default public project credentials for Motorola Happy Calling Portal
+// (In Supabase, publishable keys are safe for frontend clients and enforced via Row Level Security)
+const DEFAULT_SUPABASE_URL = "https://fmvgnbaakgdbzbqgbmmh.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_H7JNZqFemNhOrq4ZQfhddA_lAx0h9MI";
+
+const SUPABASE_URL =
+  getEnvVar("VITE_SUPABASE_URL") ||
+  (typeof window !== "undefined" && window.__SUPABASE_URL__) ||
+  DEFAULT_SUPABASE_URL;
+
+const SUPABASE_ANON_KEY =
+  getEnvVar("VITE_SUPABASE_ANON_KEY") ||
+  (typeof window !== "undefined" && window.__SUPABASE_ANON_KEY__) ||
+  DEFAULT_SUPABASE_ANON_KEY;
 
 // Helper to check if credentials are set
 export function isSupabaseConfigured() {
