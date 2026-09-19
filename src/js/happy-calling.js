@@ -88,12 +88,29 @@ async function loadNextClosure(specificSoNumber = null) {
           repair_type
         `)
         .order("closure_date", { ascending: true })
-        .order("created_at", { ascending: true })
-        .limit(60);
+        .order("created_at", { ascending: true });
 
       if (!isAdmin() && profile?.cci_code) {
         q = q.eq("cci_code", profile.cci_code);
       }
+
+      // Exclude already completed calls directly from queue query
+      let compQ = supabase
+        .from("happy_calling")
+        .select("closure_id")
+        .eq("calling_status", "Completed");
+
+      if (!isAdmin() && profile?.cci_code) {
+        compQ = compQ.eq("cci_code", profile.cci_code);
+      }
+      const { data: compRows } = await compQ;
+      const completedClosureIds = (compRows || []).map((r) => r.closure_id);
+
+      if (completedClosureIds.length > 0 && completedClosureIds.length <= 400) {
+        q = q.not("closure_id", "in", `(${completedClosureIds.join(",")})`);
+      }
+
+      q = q.limit(60);
 
       const { data: batch, error } = await q;
       if (error) throw error;
@@ -149,8 +166,9 @@ async function loadNextClosure(specificSoNumber = null) {
       if (!targetClosure && skippedClosureIds.size === 0 && attemptedClosureIds.size === 0) {
         try {
           const { data: rpcData } = await supabase.rpc("get_next_pending_closure");
-          if (rpcData?.found && rpcData.closure && !attemptedClosureIds.has(rpcData.closure.closure_id)) {
-            targetClosure = rpcData.closure;
+          const candidate = rpcData?.closure || (rpcData?.closure_id ? rpcData : null);
+          if (candidate && !attemptedClosureIds.has(candidate.closure_id)) {
+            targetClosure = candidate;
           }
         } catch (e) {
           console.warn("RPC get_next_pending_closure fallback:", e);

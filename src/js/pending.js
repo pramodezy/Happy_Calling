@@ -190,6 +190,63 @@ export async function loadPendingTable() {
   if (!profile) return;
 
   try {
+    // 1. Fetch completed closure IDs for user scope to exclude from pending backlog
+    let compQuery = supabase
+      .from("happy_calling")
+      .select("closure_id")
+      .eq("calling_status", "Completed");
+
+    if (!isAdmin()) {
+      compQuery = compQuery.eq("cci_code", profile.cci_code);
+    }
+    const { data: compRows } = await compQuery;
+    const completedSet = new Set((compRows || []).map((r) => r.closure_id));
+
+    // 2. Fetch attempted (non-completed) records to properly support attempt filters
+    let attemptsQuery = supabase
+      .from("happy_calling")
+      .select("closure_id, calling_status, customer_remarks, cci_remarks, created_at, calling_date, calling_time")
+      .in("calling_status", ["Customer Not Reachable", "Call Back Required"])
+      .order("created_at", { ascending: false });
+
+    if (!isAdmin()) {
+      attemptsQuery = attemptsQuery.eq("cci_code", profile.cci_code);
+    }
+    const { data: attemptRecords } = await attemptsQuery;
+
+    const attemptsMap = new Map();
+    if (attemptRecords) {
+      attemptRecords.forEach((rec) => {
+        if (!completedSet.has(rec.closure_id)) {
+          if (!attemptsMap.has(rec.closure_id)) {
+            attemptsMap.set(rec.closure_id, {
+              count: 1,
+              lastStatus: rec.calling_status,
+              lastTime: rec.created_at || `${rec.calling_date} ${rec.calling_time}`,
+              lastRemarks: rec.customer_remarks || rec.cci_remarks || "",
+            });
+          } else {
+            const existing = attemptsMap.get(rec.closure_id);
+            existing.count += 1;
+          }
+        }
+      });
+    }
+
+    // Determine target closure IDs if specific attempt filter is active
+    let specificFilterIds = null;
+    if (currentAttemptFilter === "NOT_REACHABLE") {
+      specificFilterIds = Array.from(attemptsMap.entries())
+        .filter(([_, att]) => att.lastStatus === "Customer Not Reachable")
+        .map(([id]) => id);
+    } else if (currentAttemptFilter === "CALL_BACK") {
+      specificFilterIds = Array.from(attemptsMap.entries())
+        .filter(([_, att]) => att.lastStatus === "Call Back Required")
+        .map(([id]) => id);
+    } else if (currentAttemptFilter === "ATTEMPTED") {
+      specificFilterIds = Array.from(attemptsMap.keys());
+    }
+
     let query = supabase
       .from("closure_master")
       .select(
@@ -213,6 +270,26 @@ export async function loadPendingTable() {
 
     if (!isAdmin()) {
       query = query.eq("cci_code", profile.cci_code);
+    }
+
+    // Server-side exclude completed closures so page 1 immediately shows pending calls
+    if (completedSet.size > 0 && completedSet.size <= 400) {
+      query = query.not("closure_id", "in", `(${Array.from(completedSet).join(",")})`);
+    }
+
+    // Apply attempt filter if applicable
+    if (specificFilterIds !== null) {
+      if (specificFilterIds.length === 0) {
+        // No closures match this filter
+        query = query.eq("closure_id", "__none__");
+      } else {
+        query = query.in("closure_id", specificFilterIds);
+      }
+    } else if (currentAttemptFilter === "FRESH") {
+      const allAttemptedOrCompleted = new Set([...completedSet, ...attemptsMap.keys()]);
+      if (allAttemptedOrCompleted.size > 0 && allAttemptedOrCompleted.size <= 400) {
+        query = query.not("closure_id", "in", `(${Array.from(allAttemptedOrCompleted).join(",")})`);
+      }
     }
 
     if (searchQuery) {
@@ -249,53 +326,36 @@ export async function loadPendingTable() {
 
     if (error) throw error;
 
-    // Filter out already completed closures & track attempts
-    const closureIds = (rawClosures || []).map((c) => c.closure_id);
-    let completedSet = new Set();
-    let attemptsMap = new Map();
+    // Filter out any completed closures that may remain (safety for > 400 completed records)
+    let pendingList = (rawClosures || []).filter((c) => !completedSet.has(c.closure_id));
+    if (currentAttemptFilter === "FRESH") {
+      pendingList = pendingList.filter((c) => !attemptsMap.has(c.closure_id));
+    }
 
-    if (closureIds.length > 0) {
-      const { data: allCallingRecords } = await supabase
+    // If fresh attempt status is needed on newly rendered page items, update attemptsMap
+    const unmappedIds = pendingList.map((c) => c.closure_id).filter((id) => !attemptsMap.has(id));
+    if (unmappedIds.length > 0) {
+      const { data: additionalRecords } = await supabase
         .from("happy_calling")
         .select("closure_id, calling_status, customer_remarks, cci_remarks, created_at, calling_date, calling_time")
-        .in("closure_id", closureIds)
+        .in("closure_id", unmappedIds)
         .order("created_at", { ascending: false });
 
-      if (allCallingRecords) {
-        allCallingRecords.forEach((rec) => {
-          if (rec.calling_status === "Completed") {
-            completedSet.add(rec.closure_id);
-          } else {
-            if (!attemptsMap.has(rec.closure_id)) {
-              attemptsMap.set(rec.closure_id, {
-                count: 1,
-                lastStatus: rec.calling_status,
-                lastTime: rec.created_at || `${rec.calling_date} ${rec.calling_time}`,
-                lastRemarks: rec.customer_remarks || rec.cci_remarks || "",
-              });
-            } else {
-              const existing = attemptsMap.get(rec.closure_id);
-              existing.count += 1;
-            }
+      if (additionalRecords) {
+        additionalRecords.forEach((rec) => {
+          if (rec.calling_status !== "Completed" && !attemptsMap.has(rec.closure_id)) {
+            attemptsMap.set(rec.closure_id, {
+              count: 1,
+              lastStatus: rec.calling_status,
+              lastTime: rec.created_at || `${rec.calling_date} ${rec.calling_time}`,
+              lastRemarks: rec.customer_remarks || rec.cci_remarks || "",
+            });
           }
         });
       }
     }
 
-    let pendingList = (rawClosures || []).filter((c) => !completedSet.has(c.closure_id));
-
-    // Filter by calling attempt status if selected
-    if (currentAttemptFilter === "FRESH") {
-      pendingList = pendingList.filter((c) => !attemptsMap.has(c.closure_id));
-    } else if (currentAttemptFilter === "ATTEMPTED") {
-      pendingList = pendingList.filter((c) => attemptsMap.has(c.closure_id));
-    } else if (currentAttemptFilter === "NOT_REACHABLE") {
-      pendingList = pendingList.filter((c) => attemptsMap.has(c.closure_id) && attemptsMap.get(c.closure_id).lastStatus === "Customer Not Reachable");
-    } else if (currentAttemptFilter === "CALL_BACK") {
-      pendingList = pendingList.filter((c) => attemptsMap.has(c.closure_id) && attemptsMap.get(c.closure_id).lastStatus === "Call Back Required");
-    }
-
-    const totalRecords = count || 0;
+    const totalRecords = count !== null && count !== undefined ? count : pendingList.length;
     let rowsHtml = "";
 
     if (pendingList.length === 0) {
