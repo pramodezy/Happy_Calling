@@ -16,12 +16,6 @@ onAuthStateChanged((profile) => {
   }
 });
 
-// Restore stored credentials if entered in browser setup fallback
-if (!window.__SUPABASE_URL__ && localStorage.getItem("__MOTO_SU_URL__")) {
-  window.__SUPABASE_URL__ = localStorage.getItem("__MOTO_SU_URL__");
-  window.__SUPABASE_ANON_KEY__ = localStorage.getItem("__MOTO_SU_KEY__");
-}
-
 async function startApplication() {
   try {
     // 1. Initialize Supabase Auth & load profile

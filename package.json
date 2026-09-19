@@ -11,7 +11,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
     "chart.js": "^4.4.8",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "vite": "^6.2.0"

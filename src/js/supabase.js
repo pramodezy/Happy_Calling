@@ -4,7 +4,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-// Retrieve environment variables configured at Vite build time, window, or localStorage
+// Retrieve environment variables configured at Vite build/dev time
 const getEnvVar = (key) => {
   try {
     if (typeof import.meta !== "undefined" && import.meta.env && import.meta.env[key]) {
@@ -14,21 +14,15 @@ const getEnvVar = (key) => {
   return null;
 };
 
-// Default Supabase project credentials for Motorola Happy Calling Portal
-const DEFAULT_SUPABASE_URL = "https://fmvgnbaakgdbzbqgbmmh.supabase.co";
-const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_H7JNZqFemNhOrq4ZQfhddA_lAx0h9MI";
-
 const SUPABASE_URL =
   getEnvVar("VITE_SUPABASE_URL") ||
-  window.__SUPABASE_URL__ ||
-  localStorage.getItem("__MOTO_SU_URL__") ||
-  DEFAULT_SUPABASE_URL;
+  (typeof window !== "undefined" && window.__SUPABASE_URL__) ||
+  "";
 
 const SUPABASE_ANON_KEY =
   getEnvVar("VITE_SUPABASE_ANON_KEY") ||
-  window.__SUPABASE_ANON_KEY__ ||
-  localStorage.getItem("__MOTO_SU_KEY__") ||
-  DEFAULT_SUPABASE_ANON_KEY;
+  (typeof window !== "undefined" && window.__SUPABASE_ANON_KEY__) ||
+  "";
 
 // Helper to check if credentials are set
 export function isSupabaseConfigured() {

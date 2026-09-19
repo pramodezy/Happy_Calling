@@ -179,12 +179,7 @@ function renderLoginPage(container) {
           !isConfigured
             ? `
           <div style="padding:1rem; background:#fffbeb; border:1px solid #fde68a; border-radius:var(--radius-md); margin-bottom:1.25rem; font-size:0.8125rem; color:#92400e;">
-            <strong>Supabase Setup Note:</strong> Configure <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in your environment or enter them below to connect.
-            <div style="margin-top:0.5rem;">
-              <input type="text" id="manual-supabase-url" class="form-input" style="font-size:0.75rem; margin-bottom:4px;" placeholder="https://xyz.supabase.co">
-              <input type="text" id="manual-supabase-key" class="form-input" style="font-size:0.75rem;" placeholder="anon-key...">
-              <button type="button" id="btn-save-manual-creds" class="btn-primary" style="margin-top:6px; font-size:0.75rem; padding:4px 8px; width:100%; justify-content:center;">Connect</button>
-            </div>
+            <strong>Configuration Required:</strong> Supabase environment variables (<code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>) are not configured. Please check your <code>.env</code> file.
           </div>
         `
             : ""
@@ -219,19 +214,6 @@ function renderLoginPage(container) {
       </div>
     </div>
   `;
-
-  // Manual Credentials helper if running before .env is populated
-  document.getElementById("btn-save-manual-creds")?.addEventListener("click", () => {
-    const url = document.getElementById("manual-supabase-url")?.value.trim();
-    const key = document.getElementById("manual-supabase-key")?.value.trim();
-    if (url && key) {
-      window.__SUPABASE_URL__ = url;
-      window.__SUPABASE_ANON_KEY__ = key;
-      localStorage.setItem("__MOTO_SU_URL__", url);
-      localStorage.setItem("__MOTO_SU_KEY__", key);
-      window.location.reload();
-    }
-  });
 
   // Login Form Submission
   const form = document.getElementById("login-form");
