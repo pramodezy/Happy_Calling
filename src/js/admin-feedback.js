@@ -161,6 +161,32 @@ async function loadFeedbackData() {
     const happyRate = dashData?.happy_rate || (completedCalls > 0 ? Math.round((happyCount / completedCalls) * 100) : 0);
     const avgRating = dashData?.avg_rating || 0;
 
+    // Fetch national survey metrics
+    let surveyReceivedRate = 0;
+    let surveySubmittedRate = 0;
+    let surveyReceivedCount = 0;
+    let surveySubmittedCount = 0;
+
+    try {
+      const { data: sRows, error: sErr } = await supabase
+        .from("happy_calling")
+        .select("survey_email_received, survey_submitted")
+        .eq("calling_status", "Completed");
+
+      if (!sErr && sRows && sRows.length > 0) {
+        const tracked = sRows.filter((r) => r.survey_email_received !== null && r.survey_email_received !== undefined);
+        const totalTracked = tracked.length;
+        if (totalTracked > 0) {
+          surveyReceivedCount = tracked.filter((r) => r.survey_email_received === "Yes").length;
+          surveySubmittedCount = tracked.filter((r) => r.survey_submitted === "Yes").length;
+          surveyReceivedRate = Math.round((surveyReceivedCount / totalTracked) * 100);
+          surveySubmittedRate = Math.round((surveySubmittedCount / totalTracked) * 100);
+        }
+      }
+    } catch {
+      // safe fallback if columns not yet in DB
+    }
+
     kpiMount.innerHTML = `
       ${renderKpiCard({
         title: "Happy Delighted %",
@@ -177,18 +203,25 @@ async function loadFeedbackData() {
         subtitle: "National CSAT Score",
       })}
       ${renderKpiCard({
+        title: "Survey Email %",
+        value: `${surveyReceivedRate}%`,
+        icon: icons.mail,
+        colorScheme: "blue",
+        subtitle: `${surveyReceivedCount.toLocaleString()} Customers Received`,
+      })}
+      ${renderKpiCard({
+        title: "Survey Complete %",
+        value: `${surveySubmittedRate}%`,
+        icon: icons.clipboardCheck || icons.checkCircle,
+        colorScheme: "green",
+        subtitle: `${surveySubmittedCount.toLocaleString()} Surveys Completed`,
+      })}
+      ${renderKpiCard({
         title: "Delighted Customers",
         value: happyCount.toLocaleString(),
         icon: icons.heart || icons.smile,
         colorScheme: "green",
         subtitle: "Positive Feedback",
-      })}
-      ${renderKpiCard({
-        title: "Neutral Feedback",
-        value: neutralCount.toLocaleString(),
-        icon: icons.meh,
-        colorScheme: "blue",
-        subtitle: "Satisfied / Neutral",
       })}
       ${renderKpiCard({
         title: "DSAT Escalations",
