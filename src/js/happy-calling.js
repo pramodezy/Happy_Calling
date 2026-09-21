@@ -213,11 +213,20 @@ async function loadNextClosure(specificSoNumber = null) {
 
     // Check if previous calling attempts exist for this closure
     try {
-      const { data: pastAttempts } = await supabase
+      let { data: pastAttempts, error: pErr } = await supabase
         .from("happy_calling")
         .select("calling_status, calling_date, calling_time, customer_remarks, cci_remarks, survey_email_received, survey_submitted, created_at")
         .eq("closure_id", currentClosure.closure_id)
         .order("created_at", { ascending: false });
+
+      if (pErr && (pErr.message?.includes("survey_email_received") || pErr.code === "PGRST204" || pErr.code === "42703")) {
+        const fallback = await supabase
+          .from("happy_calling")
+          .select("calling_status, calling_date, calling_time, customer_remarks, cci_remarks, created_at")
+          .eq("closure_id", currentClosure.closure_id)
+          .order("created_at", { ascending: false });
+        pastAttempts = fallback.data;
+      }
 
       if (pastAttempts && pastAttempts.length > 0) {
         currentClosure.attempts = pastAttempts;

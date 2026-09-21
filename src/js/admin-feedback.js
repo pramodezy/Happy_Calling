@@ -202,15 +202,27 @@ async function loadFeedbackData() {
     renderFeedbackDonut(happyCount, neutralCount, unhappyCount);
     renderRatingDistChart(dashData?.rating_distribution || []);
 
-    // Fetch recent calling records from happy_calling
-    const { data: records, error: recErr } = await supabase
+    // Fetch recent calling records from happy_calling with fallback if migration not yet applied
+    let records = [];
+    let { data: fetchedRecords, error: recErr } = await supabase
       .from("happy_calling")
       .select("id, closure_id, so_number, cci_code, cci_name, calling_date, calling_time, calling_status, customer_rating, feedback_category, customer_remarks, cci_remarks, survey_email_received, survey_submitted, created_at")
       .order("created_at", { ascending: false })
       .limit(100);
 
+    if (recErr && (recErr.message?.includes("survey_email_received") || recErr.code === "PGRST204" || recErr.code === "42703")) {
+      console.warn("Survey columns not yet present on happy_calling table. Falling back to base query.");
+      const fallback = await supabase
+        .from("happy_calling")
+        .select("id, closure_id, so_number, cci_code, cci_name, calling_date, calling_time, calling_status, customer_rating, feedback_category, customer_remarks, cci_remarks, created_at")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      fetchedRecords = fallback.data;
+      recErr = fallback.error;
+    }
+
     if (recErr) throw recErr;
-    feedbackRecords = records || [];
+    feedbackRecords = fetchedRecords || [];
     renderFilteredFeedbackTable();
   } catch (err) {
     console.error("loadFeedbackData error:", err);
