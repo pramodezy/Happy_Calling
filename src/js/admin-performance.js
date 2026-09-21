@@ -12,10 +12,11 @@ import Chart from "chart.js/auto";
 
 let perfCompareChart = null;
 let allCciData = [];
+let surveyByCci = {};
 let searchQuery = "";
 let filterRegion = "";
 let filterTier = "ALL";
-let sortBy = "completion_rate"; // completion_rate, total_closures, happy_rate, avg_rating, pending_calls
+let sortBy = "completion_rate"; // completion_rate, total_closures, happy_rate, avg_rating, pending_calls, survey_complete
 let sortOrder = "desc";
 
 export async function renderAdminPerformancePage(container) {
@@ -91,6 +92,8 @@ export async function renderAdminPerformancePage(container) {
 
           <select id="perf-sort-by" class="filter-select" style="font-size:0.8125rem; padding:5px 10px;">
             <option value="completion_rate">Sort: Completion Rate</option>
+            <option value="survey_complete">Sort: Survey Complete %</option>
+            <option value="survey_email">Sort: Survey Email %</option>
             <option value="total_closures">Sort: Total Closures</option>
             <option value="happy_rate">Sort: Happy %</option>
             <option value="avg_rating">Sort: Avg Rating</option>
@@ -113,11 +116,12 @@ export async function renderAdminPerformancePage(container) {
               <th style="min-width:140px;">Completion %</th>
               <th>Happy %</th>
               <th>DSAT %</th>
+              <th>Survey (Email / Sub)</th>
               <th>Avg Rating</th>
             </tr>
           </thead>
           <tbody id="perf-table-body">
-            <tr><td colspan="11">${renderSpinner("Loading partner rankings...")}</td></tr>
+            <tr><td colspan="12">${renderSpinner("Loading partner rankings...")}</td></tr>
           </tbody>
         </table>
       </div>
@@ -177,6 +181,53 @@ async function loadPerformanceMetrics() {
     const midPerformers = allCciData.filter((c) => Number(c.completion_rate) >= 70 && Number(c.completion_rate) < 90).length;
     const lowPerformers = allCciData.filter((c) => Number(c.completion_rate) < 70).length;
 
+    // Fetch survey confirmation metrics across CCIs
+    let surveyReceivedRate = 0;
+    let surveySubmittedRate = 0;
+    let surveyReceivedCount = 0;
+    let surveySubmittedCount = 0;
+    surveyByCci = {};
+
+    try {
+      const { data: sRows, error: sErr } = await supabase
+        .from("happy_calling")
+        .select("cci_code, survey_email_received, survey_submitted")
+        .eq("calling_status", "Completed");
+
+      if (!sErr && sRows && sRows.length > 0) {
+        sRows.forEach((r) => {
+          if (!surveyByCci[r.cci_code]) {
+            surveyByCci[r.cci_code] = { total: 0, received: 0, submitted: 0 };
+          }
+          if (r.survey_email_received !== null && r.survey_email_received !== undefined) {
+            surveyByCci[r.cci_code].total++;
+            if (r.survey_email_received === "Yes") surveyByCci[r.cci_code].received++;
+            if (r.survey_submitted === "Yes") surveyByCci[r.cci_code].submitted++;
+          }
+        });
+
+        Object.keys(surveyByCci).forEach((code) => {
+          const item = surveyByCci[code];
+          item.emailRate = item.total > 0 ? Math.round((item.received / item.total) * 100) : 0;
+          item.subRate = item.total > 0 ? Math.round((item.submitted / item.total) * 100) : 0;
+        });
+
+        // Scope to visible stations (e.g. BSM regions or selected region)
+        const currentCciSet = new Set(allCciData.map((c) => c.cci_code));
+        const scopedRows = sRows.filter((r) => currentCciSet.has(r.cci_code));
+        const tracked = scopedRows.filter((r) => r.survey_email_received !== null && r.survey_email_received !== undefined);
+        const totalTracked = tracked.length;
+        if (totalTracked > 0) {
+          surveyReceivedCount = tracked.filter((r) => r.survey_email_received === "Yes").length;
+          surveySubmittedCount = tracked.filter((r) => r.survey_submitted === "Yes").length;
+          surveyReceivedRate = Math.round((surveyReceivedCount / totalTracked) * 100);
+          surveySubmittedRate = Math.round((surveySubmittedCount / totalTracked) * 100);
+        }
+      }
+    } catch {
+      // safe fallback
+    }
+
     kpiMount.innerHTML = `
       ${renderKpiCard({
         title: "Active Stations",
@@ -191,6 +242,20 @@ async function loadPerformanceMetrics() {
         icon: icons.award,
         colorScheme: "green",
         subtitle: `${totalStations > 0 ? Math.round((highPerformers / totalStations) * 100) : 0}% Meeting SLA Target`,
+      })}
+      ${renderKpiCard({
+        title: "Survey Email %",
+        value: `${surveyReceivedRate}%`,
+        icon: icons.mail,
+        colorScheme: "blue",
+        subtitle: `${surveyReceivedCount.toLocaleString()} Received Email`,
+      })}
+      ${renderKpiCard({
+        title: "Survey Complete %",
+        value: `${surveySubmittedRate}%`,
+        icon: icons.clipboardCheck || icons.checkCircle,
+        colorScheme: "green",
+        subtitle: `${surveySubmittedCount.toLocaleString()} Surveys Submitted`,
       })}
       ${renderKpiCard({
         title: "Average Tier (70-89%)",
@@ -332,6 +397,16 @@ function renderFilteredTable() {
 
   // Sorting
   filtered.sort((a, b) => {
+    if (sortBy === "survey_complete") {
+      const valA = surveyByCci[a.cci_code]?.subRate || 0;
+      const valB = surveyByCci[b.cci_code]?.subRate || 0;
+      return sortOrder === "desc" ? valB - valA : valA - valB;
+    }
+    if (sortBy === "survey_email") {
+      const valA = surveyByCci[a.cci_code]?.emailRate || 0;
+      const valB = surveyByCci[b.cci_code]?.emailRate || 0;
+      return sortOrder === "desc" ? valB - valA : valA - valB;
+    }
     const valA = Number(a[sortBy]) || 0;
     const valB = Number(b[sortBy]) || 0;
     return sortOrder === "desc" ? valB - valA : valA - valB;
@@ -340,7 +415,7 @@ function renderFilteredTable() {
   if (filtered.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="11" style="text-align:center; padding:2rem; color:var(--text-tertiary);">
+        <td colspan="12" style="text-align:center; padding:2rem; color:var(--text-tertiary);">
           No station records match your filters.
         </td>
       </tr>
@@ -357,6 +432,7 @@ function renderFilteredTable() {
 
       const compRate = Number(cci.completion_rate) || 0;
       const progressColor = compRate >= 90 ? "#10b981" : compRate >= 70 ? "#0072ce" : "#ef4444";
+      const sInfo = surveyByCci[cci.cci_code];
 
       return `
         <tr>
@@ -380,6 +456,14 @@ function renderFilteredTable() {
           </td>
           <td><span style="color:var(--status-success-dot); font-weight:600;">${cci.happy_rate}%</span></td>
           <td><span style="color:var(--status-danger-dot); font-weight:600;">${cci.dsat_rate}%</span></td>
+          <td>
+            ${sInfo && sInfo.total > 0 ? `
+              <div style="display:flex; flex-direction:column; gap:2px; font-size:0.75rem;">
+                <span>Email: <strong style="color:${sInfo.emailRate >= 80 ? '#059669' : '#d97706'}">${sInfo.emailRate}%</strong></span>
+                <span>Sub: <strong style="color:${sInfo.subRate >= 70 ? '#059669' : '#dc2626'}">${sInfo.subRate}%</strong></span>
+              </div>
+            ` : `<span style="color:var(--text-tertiary); font-size:0.75rem;">—</span>`}
+          </td>
           <td>${renderRatingBadge(cci.avg_rating)}</td>
         </tr>
       `;
@@ -390,21 +474,26 @@ function renderFilteredTable() {
 function exportPerfCsv() {
   if (!allCciData || allCciData.length === 0) return;
 
-  const headers = ["Rank", "CCI Code", "CCI Name", "Region", "Location", "Total Closures", "Completed Calls", "Pending Calls", "Completion Rate (%)", "Happy Rate (%)", "DSAT Rate (%)", "Avg Rating"];
-  const rows = allCciData.map((c, idx) => [
-    idx + 1,
-    `"${(c.cci_code || "").replace(/"/g, '""')}"`,
-    `"${(c.cci_name || "").replace(/"/g, '""')}"`,
-    `"${(c.region || "").replace(/"/g, '""')}"`,
-    `"${(c.location || "").replace(/"/g, '""')}"`,
-    c.total_closures,
-    c.completed_calls,
-    c.pending_calls,
-    c.completion_rate,
-    c.happy_rate,
-    c.dsat_rate,
-    c.avg_rating,
-  ]);
+  const headers = ["Rank", "CCI Code", "CCI Name", "Region", "Location", "Total Closures", "Completed Calls", "Pending Calls", "Completion Rate (%)", "Happy Rate (%)", "DSAT Rate (%)", "Survey Email Rate (%)", "Survey Complete Rate (%)", "Avg Rating"];
+  const rows = allCciData.map((c, idx) => {
+    const sInfo = surveyByCci[c.cci_code];
+    return [
+      idx + 1,
+      `"${(c.cci_code || "").replace(/"/g, '""')}"`,
+      `"${(c.cci_name || "").replace(/"/g, '""')}"`,
+      `"${(c.region || "").replace(/"/g, '""')}"`,
+      `"${(c.location || "").replace(/"/g, '""')}"`,
+      c.total_closures,
+      c.completed_calls,
+      c.pending_calls,
+      c.completion_rate,
+      c.happy_rate,
+      c.dsat_rate,
+      sInfo && sInfo.total > 0 ? `${sInfo.emailRate}%` : "—",
+      sInfo && sInfo.total > 0 ? `${sInfo.subRate}%` : "—",
+      c.avg_rating,
+    ];
+  });
 
   const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
   const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });

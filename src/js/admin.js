@@ -159,11 +159,12 @@ export async function renderAdminDashboard(container) {
               <th>Completion %</th>
               <th>Happy %</th>
               <th>DSAT %</th>
+              <th>Survey (Email / Sub)</th>
               <th>Avg Rating</th>
             </tr>
           </thead>
           <tbody id="admin-cci-table-body">
-            <tr><td colspan="11">${renderSpinner("Loading CCI performance table...")}</td></tr>
+            <tr><td colspan="12">${renderSpinner("Loading CCI performance table...")}</td></tr>
           </tbody>
         </table>
       </div>
@@ -360,14 +361,71 @@ export async function loadAdminMetrics() {
     const unhappyCount = Number(data.unhappy_count) || 0;
     const avgRating = data.avg_rating !== undefined && data.avg_rating !== null ? data.avg_rating : 0;
 
-    // 8 Admin KPI cards
+    // Fetch survey confirmation metrics across CCIs / assigned scope
+    let surveyReceivedRate = 0;
+    let surveySubmittedRate = 0;
+    let surveyReceivedCount = 0;
+    let surveySubmittedCount = 0;
+    const surveyByCci = {};
+
+    try {
+      const { data: sRows, error: sErr } = await supabase
+        .from("happy_calling")
+        .select("cci_code, survey_email_received, survey_submitted")
+        .eq("calling_status", "Completed");
+
+      if (!sErr && sRows && sRows.length > 0) {
+        // Aggregate per CCI
+        sRows.forEach((r) => {
+          if (!surveyByCci[r.cci_code]) {
+            surveyByCci[r.cci_code] = { total: 0, received: 0, submitted: 0 };
+          }
+          if (r.survey_email_received !== null && r.survey_email_received !== undefined) {
+            surveyByCci[r.cci_code].total++;
+            if (r.survey_email_received === "Yes") surveyByCci[r.cci_code].received++;
+            if (r.survey_submitted === "Yes") surveyByCci[r.cci_code].submitted++;
+          }
+        });
+
+        Object.keys(surveyByCci).forEach((code) => {
+          const item = surveyByCci[code];
+          item.emailRate = item.total > 0 ? Math.round((item.received / item.total) * 100) : 0;
+          item.subRate = item.total > 0 ? Math.round((item.submitted / item.total) * 100) : 0;
+        });
+
+        // Filter rows matching current view/filters for KPI cards
+        let filteredRows = sRows;
+        if (selectedCci) {
+          filteredRows = filteredRows.filter((r) => r.cci_code === selectedCci);
+        } else if (isBsmUser && assignedRegions.length > 0) {
+          const assignedCciSet = new Set(cachedCcis.map((c) => c.cci_code));
+          filteredRows = filteredRows.filter((r) => assignedCciSet.has(r.cci_code));
+        } else if (selectedRegion) {
+          const regionCciSet = new Set(cachedCcis.filter((c) => c.region === selectedRegion).map((c) => c.cci_code));
+          filteredRows = filteredRows.filter((r) => regionCciSet.has(r.cci_code));
+        }
+
+        const tracked = filteredRows.filter((r) => r.survey_email_received !== null && r.survey_email_received !== undefined);
+        const totalTracked = tracked.length;
+        if (totalTracked > 0) {
+          surveyReceivedCount = tracked.filter((r) => r.survey_email_received === "Yes").length;
+          surveySubmittedCount = tracked.filter((r) => r.survey_submitted === "Yes").length;
+          surveyReceivedRate = Math.round((surveyReceivedCount / totalTracked) * 100);
+          surveySubmittedRate = Math.round((surveySubmittedCount / totalTracked) * 100);
+        }
+      }
+    } catch {
+      // safe fallback if columns not yet migrated in DB
+    }
+
+    // Admin & BSM KPI cards
     kpiMount.innerHTML = `
       ${renderKpiCard({
         title: "Total Closures",
         value: totalClosures.toLocaleString(),
         icon: icons.database,
         colorScheme: "blue",
-        subtitle: "Motorola Closed Jobs",
+        subtitle: isBsmUser ? "Assigned Regions" : "Motorola Closed Jobs",
       })}
       ${renderKpiCard({
         title: "Completed Calls",
@@ -381,14 +439,28 @@ export async function loadAdminMetrics() {
         value: pendingCalls.toLocaleString(),
         icon: icons.clock,
         colorScheme: "amber",
-        subtitle: "Across All CCIs",
+        subtitle: isBsmUser ? "Regional Pending" : "Across All CCIs",
       })}
       ${renderKpiCard({
         title: "Completion %",
         value: `${completionRate}%`,
         icon: icons.award,
         colorScheme: Number(completionRate) >= 90 ? "green" : "purple",
-        subtitle: "National Benchmark: 95%",
+        subtitle: "Benchmark: 95%",
+      })}
+      ${renderKpiCard({
+        title: "Survey Email %",
+        value: `${surveyReceivedRate}%`,
+        icon: icons.mail,
+        colorScheme: "blue",
+        subtitle: `${surveyReceivedCount.toLocaleString()} Received Email`,
+      })}
+      ${renderKpiCard({
+        title: "Survey Complete %",
+        value: `${surveySubmittedRate}%`,
+        icon: icons.clipboardCheck || icons.checkCircle,
+        colorScheme: "green",
+        subtitle: `${surveySubmittedCount.toLocaleString()} Surveys Submitted`,
       })}
       ${renderKpiCard({
         title: "Happy %",
@@ -416,7 +488,7 @@ export async function loadAdminMetrics() {
         value: `${avgRating} <span style="font-size:1.1rem; color:var(--text-tertiary);">/10</span>`,
         icon: icons.award,
         colorScheme: Number(avgRating) >= 8 ? "green" : "amber",
-        subtitle: "National Customer CSAT",
+        subtitle: isBsmUser ? "Regional Customer CSAT" : "National Customer CSAT",
       })}
     `;
 
@@ -426,7 +498,7 @@ export async function loadAdminMetrics() {
       if (cciList.length === 0) {
         tableBody.innerHTML = `
           <tr>
-            <td colspan="11" style="text-align:center; padding:2rem; color:var(--text-tertiary);">
+            <td colspan="12" style="text-align:center; padding:2rem; color:var(--text-tertiary);">
               No CCI performance data matching the filters.
             </td>
           </tr>
@@ -438,6 +510,8 @@ export async function loadAdminMetrics() {
             if (idx === 0) rankBadge = `🥇 <strong style="color:#d97706;">1st</strong>`;
             if (idx === 1) rankBadge = `🥈 <strong style="color:#64748b;">2nd</strong>`;
             if (idx === 2) rankBadge = `🥉 <strong style="color:#b45309;">3rd</strong>`;
+
+            const sInfo = surveyByCci[cci.cci_code];
 
             return `
             <tr>
@@ -456,6 +530,14 @@ export async function loadAdminMetrics() {
               </td>
               <td><span style="color:var(--status-success-dot); font-weight:600;">${cci.happy_rate}%</span></td>
               <td><span style="color:var(--status-danger-dot); font-weight:600;">${cci.dsat_rate}%</span></td>
+              <td>
+                ${sInfo && sInfo.total > 0 ? `
+                  <div style="display:flex; flex-direction:column; gap:2px; font-size:0.75rem;">
+                    <span>Email: <strong style="color:${sInfo.emailRate >= 80 ? '#059669' : '#d97706'}">${sInfo.emailRate}%</strong></span>
+                    <span>Sub: <strong style="color:${sInfo.subRate >= 70 ? '#059669' : '#dc2626'}">${sInfo.subRate}%</strong></span>
+                  </div>
+                ` : `<span style="color:var(--text-tertiary); font-size:0.75rem;">—</span>`}
+              </td>
               <td>${renderRatingBadge(cci.avg_rating)}</td>
             </tr>
           `;
