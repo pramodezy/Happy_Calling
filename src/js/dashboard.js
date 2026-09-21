@@ -128,6 +128,8 @@ export async function loadDashboardMetrics() {
   const ageingContainer = document.getElementById("ageing-breakdown-container");
   if (!kpiGrid) return;
 
+  const profile = getCurrentProfile() || {};
+
   try {
     const { data, error } = await supabase.rpc("get_cci_dashboard", {
       p_timeframe: currentTimeframe,

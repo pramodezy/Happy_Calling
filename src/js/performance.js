@@ -54,6 +54,8 @@ async function loadPerformanceData() {
   const kpiMount = document.getElementById("perf-kpi-mount");
   if (!kpiMount) return;
 
+  const profile = getCurrentProfile() || {};
+
   try {
     const { data, error } = await supabase.rpc("get_cci_dashboard", { p_timeframe: "ALL" });
     if (error) throw error;

@@ -132,6 +132,42 @@ export async function renderAdminDashboard(container) {
       </div>
     </div>
 
+    <!-- Regional Performance Summary Section -->
+    <div class="table-card" style="margin-bottom:1.75rem;">
+      <div class="table-card-header" style="flex-wrap:wrap; gap:0.5rem;">
+        <div>
+          <h3 class="table-card-title">${isBsmUser ? "Assigned Regional Performance Summary" : "Regional Performance Summary"}</h3>
+          <span style="font-size:0.75rem; color:var(--text-tertiary);">Territory-level Happy Calling completion rates, customer CSAT, and Motorola Survey compliance</span>
+        </div>
+        <span class="badge ${isBsmUser ? "badge-warning" : "badge-info"}" style="font-size:0.6875rem; padding:2px 8px;">
+          ${isBsmUser ? "TERRITORY SCOPED" : "NATIONAL BREAKDOWN"}
+        </span>
+      </div>
+
+      <div class="table-responsive-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Region</th>
+              <th>Active CCIs</th>
+              <th>Total Closures</th>
+              <th>Completed Calls</th>
+              <th>Pending Calls</th>
+              <th>Completion %</th>
+              <th>Happy %</th>
+              <th>DSAT %</th>
+              <th>Survey Email %</th>
+              <th>Survey Complete %</th>
+              <th>Avg Rating</th>
+            </tr>
+          </thead>
+          <tbody id="admin-regional-table-body">
+            <tr><td colspan="11">${renderSpinner("Loading regional performance...")}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- CCI Performance Table & Leaderboard -->
     <div class="table-card">
       <div class="table-card-header" style="flex-wrap:wrap; gap:0.5rem;">
@@ -336,7 +372,11 @@ async function populateFilters() {
 export async function loadAdminMetrics() {
   const kpiMount = document.getElementById("admin-kpi-mount");
   const tableBody = document.getElementById("admin-cci-table-body");
+  const regionalTableBody = document.getElementById("admin-regional-table-body");
   if (!kpiMount) return;
+
+  const isBsmUser = isBSM();
+  const assignedRegions = getUserAssignedRegions();
 
   try {
     const { data, error } = await supabase.rpc("get_admin_dashboard", {
@@ -395,14 +435,14 @@ export async function loadAdminMetrics() {
 
         // Filter rows matching current view/filters for KPI cards
         let filteredRows = sRows;
-        if (selectedCci) {
-          filteredRows = filteredRows.filter((r) => r.cci_code === selectedCci);
+        if (filterCci) {
+          filteredRows = filteredRows.filter((r) => r.cci_code === filterCci);
+        } else if (filterRegion) {
+          const regionCciSet = new Set(cachedCcis.filter((c) => (c.region || "").trim().toLowerCase() === filterRegion.trim().toLowerCase()).map((c) => c.cci_code));
+          filteredRows = filteredRows.filter((r) => regionCciSet.has(r.cci_code));
         } else if (isBsmUser && assignedRegions.length > 0) {
           const assignedCciSet = new Set(cachedCcis.map((c) => c.cci_code));
           filteredRows = filteredRows.filter((r) => assignedCciSet.has(r.cci_code));
-        } else if (selectedRegion) {
-          const regionCciSet = new Set(cachedCcis.filter((c) => c.region === selectedRegion).map((c) => c.cci_code));
-          filteredRows = filteredRows.filter((r) => regionCciSet.has(r.cci_code));
         }
 
         const tracked = filteredRows.filter((r) => r.survey_email_received !== null && r.survey_email_received !== undefined);
@@ -414,8 +454,8 @@ export async function loadAdminMetrics() {
           surveySubmittedRate = Math.round((surveySubmittedCount / totalTracked) * 100);
         }
       }
-    } catch {
-      // safe fallback if columns not yet migrated in DB
+    } catch (sEx) {
+      console.warn("Survey metrics fetch notice:", sEx);
     }
 
     // Admin & BSM KPI cards
@@ -492,8 +532,120 @@ export async function loadAdminMetrics() {
       })}
     `;
 
-    // Render CCI Performance Table
     const cciList = data.cci_performance || [];
+
+    // Render Regional Performance Table
+    if (regionalTableBody) {
+      const regionalMap = {};
+      cciList.forEach((c) => {
+        const reg = (c.region || "Unassigned").trim();
+        if (!regionalMap[reg]) {
+          regionalMap[reg] = {
+            region: reg,
+            cciCount: 0,
+            totalClosures: 0,
+            completedCalls: 0,
+            pendingCalls: 0,
+            happyCalls: 0,
+            dsatCalls: 0,
+            ratingSum: 0,
+            ratingCount: 0,
+            surveyTracked: 0,
+            surveyReceived: 0,
+            surveySubmitted: 0,
+          };
+        }
+        const item = regionalMap[reg];
+        item.cciCount++;
+        const closures = Number(c.total_closures) || 0;
+        const completed = Number(c.completed_calls) || 0;
+        const pending = Number(c.pending_calls) || 0;
+        item.totalClosures += closures;
+        item.completedCalls += completed;
+        item.pendingCalls += pending;
+
+        const happyRateVal = Number(c.happy_rate) || 0;
+        const dsatRateVal = Number(c.dsat_rate) || 0;
+        item.happyCalls += Math.round((happyRateVal / 100) * completed);
+        item.dsatCalls += Math.round((dsatRateVal / 100) * completed);
+
+        const avgR = Number(c.avg_rating) || 0;
+        if (avgR > 0 && completed > 0) {
+          item.ratingSum += avgR * completed;
+          item.ratingCount += completed;
+        }
+
+        const sInfo = surveyByCci[c.cci_code];
+        if (sInfo && sInfo.total > 0) {
+          item.surveyTracked += sInfo.total;
+          item.surveyReceived += sInfo.received;
+          item.surveySubmitted += sInfo.submitted;
+        }
+      });
+
+      const regions = Object.values(regionalMap).sort((a, b) => b.totalClosures - a.totalClosures);
+
+      if (regions.length === 0) {
+        regionalTableBody.innerHTML = `
+          <tr>
+            <td colspan="11" style="text-align:center; padding:2rem; color:var(--text-tertiary);">
+              No regional data available matching the filters.
+            </td>
+          </tr>
+        `;
+      } else {
+        regionalTableBody.innerHTML = regions
+          .map((reg) => {
+            const compRate = reg.totalClosures > 0 ? Math.round((reg.completedCalls / reg.totalClosures) * 1000) / 10 : 0;
+            const happyRateVal = reg.completedCalls > 0 ? Math.round((reg.happyCalls / reg.completedCalls) * 1000) / 10 : 0;
+            const dsatRateVal = reg.completedCalls > 0 ? Math.round((reg.dsatCalls / reg.completedCalls) * 1000) / 10 : 0;
+            const emailRate = reg.surveyTracked > 0 ? Math.round((reg.surveyReceived / reg.surveyTracked) * 100) : 0;
+            const subRate = reg.surveyTracked > 0 ? Math.round((reg.surveySubmitted / reg.surveyTracked) * 100) : 0;
+            const avgScore = reg.ratingCount > 0 ? (reg.ratingSum / reg.ratingCount).toFixed(1) : "—";
+            const progressColor = compRate >= 90 ? "#10b981" : compRate >= 70 ? "#0072ce" : "#ef4444";
+
+            return `
+              <tr>
+                <td><strong style="color:var(--text-primary); font-size:0.875rem;">${escapeHtml(reg.region)}</strong></td>
+                <td><span class="badge badge-neutral">${reg.cciCount} CCIs</span></td>
+                <td><strong>${reg.totalClosures.toLocaleString()}</strong></td>
+                <td><span style="color:var(--status-success-dot); font-weight:600;">${reg.completedCalls.toLocaleString()}</span></td>
+                <td><span style="color:var(--status-warning-dot); font-weight:600;">${reg.pendingCalls.toLocaleString()}</span></td>
+                <td>
+                  <div style="display:flex; align-items:center; gap:0.5rem;">
+                    <div style="flex:1; min-width:60px; height:6px; background:#e2e8f0; border-radius:3px; overflow:hidden;">
+                      <div style="width:${Math.min(compRate, 100)}%; height:100%; background:${progressColor}; border-radius:3px;"></div>
+                    </div>
+                    <strong style="min-width:40px; font-size:0.8125rem;">${compRate}%</strong>
+                  </div>
+                </td>
+                <td><span style="color:var(--status-success-dot); font-weight:600;">${happyRateVal}%</span></td>
+                <td><span style="color:var(--status-danger-dot); font-weight:600;">${dsatRateVal}%</span></td>
+                <td>
+                  ${reg.surveyTracked > 0 ? `
+                    <div style="display:flex; align-items:center; gap:6px;">
+                      <span class="badge ${emailRate >= 80 ? 'badge-success' : 'badge-warning'}" style="font-size:0.75rem;">${emailRate}%</span>
+                      <span style="font-size:0.75rem; color:var(--text-tertiary);">(${reg.surveyReceived}/${reg.surveyTracked})</span>
+                    </div>
+                  ` : `<span style="color:var(--text-tertiary); font-size:0.75rem;">—</span>`}
+                </td>
+                <td>
+                  ${reg.surveyTracked > 0 ? `
+                    <div style="display:flex; align-items:center; gap:6px;">
+                      <span class="badge ${subRate >= 70 ? 'badge-success' : 'badge-danger'}" style="font-size:0.75rem;">${subRate}%</span>
+                      <span style="font-size:0.75rem; color:var(--text-tertiary);">(${reg.surveySubmitted}/${reg.surveyTracked})</span>
+                    </div>
+                  ` : `<span style="color:var(--text-tertiary); font-size:0.75rem;">—</span>`}
+                </td>
+                <td>${renderRatingBadge(avgScore)}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+    }
+
+    // Render CCI Performance Table
     if (tableBody) {
       if (cciList.length === 0) {
         tableBody.innerHTML = `
@@ -533,8 +685,15 @@ export async function loadAdminMetrics() {
               <td>
                 ${sInfo && sInfo.total > 0 ? `
                   <div style="display:flex; flex-direction:column; gap:2px; font-size:0.75rem;">
-                    <span>Email: <strong style="color:${sInfo.emailRate >= 80 ? '#059669' : '#d97706'}">${sInfo.emailRate}%</strong></span>
-                    <span>Sub: <strong style="color:${sInfo.subRate >= 70 ? '#059669' : '#dc2626'}">${sInfo.subRate}%</strong></span>
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                      <span style="color:var(--text-secondary);">Email:</span>
+                      <strong style="color:${sInfo.emailRate >= 80 ? '#059669' : '#d97706'}">${sInfo.emailRate}%</strong>
+                    </div>
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                      <span style="color:var(--text-secondary);">Sub:</span>
+                      <strong style="color:${sInfo.subRate >= 70 ? '#059669' : '#dc2626'}">${sInfo.subRate}%</strong>
+                    </div>
+                    <span style="font-size:0.68rem; color:var(--text-tertiary);">(${sInfo.submitted}/${sInfo.total})</span>
                   </div>
                 ` : `<span style="color:var(--text-tertiary); font-size:0.75rem;">—</span>`}
               </td>
