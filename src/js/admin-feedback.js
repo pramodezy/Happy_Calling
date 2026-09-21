@@ -106,12 +106,13 @@ export async function renderAdminFeedbackPage(container) {
               <th>CCI Station</th>
               <th>Rating</th>
               <th>Sentiment</th>
+              <th>Survey Status</th>
               <th style="min-width:240px;">Customer Remarks</th>
               <th>Calling Status</th>
             </tr>
           </thead>
           <tbody id="feedback-table-body">
-            <tr><td colspan="7">${renderSpinner("Loading customer feedback records...")}</td></tr>
+            <tr><td colspan="8">${renderSpinner("Loading customer feedback records...")}</td></tr>
           </tbody>
         </table>
       </div>
@@ -204,7 +205,7 @@ async function loadFeedbackData() {
     // Fetch recent calling records from happy_calling
     const { data: records, error: recErr } = await supabase
       .from("happy_calling")
-      .select("id, closure_id, so_number, cci_code, cci_name, calling_date, calling_time, calling_status, customer_rating, feedback_category, customer_remarks, cci_remarks, created_at")
+      .select("id, closure_id, so_number, cci_code, cci_name, calling_date, calling_time, calling_status, customer_rating, feedback_category, customer_remarks, cci_remarks, survey_email_received, survey_submitted, created_at")
       .order("created_at", { ascending: false })
       .limit(100);
 
@@ -382,6 +383,14 @@ function renderFilteredFeedbackTable() {
           </td>
           <td>${renderRatingBadge(r.customer_rating)}</td>
           <td>${renderFeedbackBadge(r.feedback_category)}</td>
+          <td>
+            ${r.survey_email_received ? `
+              <div style="display:flex; flex-direction:column; gap:2px; font-size:0.75rem;">
+                <span>Email: <strong style="color:${r.survey_email_received === 'Yes' ? '#059669' : '#dc2626'}">${escapeHtml(r.survey_email_received)}</strong></span>
+                <span>Sub: <strong style="color:${r.survey_submitted === 'Yes' ? '#059669' : '#dc2626'}">${escapeHtml(r.survey_submitted || '—')}</strong></span>
+              </div>
+            ` : '<span style="color:var(--text-tertiary); font-size:0.75rem;">—</span>'}
+          </td>
           <td>${remarks}</td>
           <td><span class="badge badge-success">${escapeHtml(r.calling_status || "Completed")}</span></td>
         </tr>
@@ -393,7 +402,7 @@ function renderFilteredFeedbackTable() {
 function exportFeedbackCsv() {
   if (!feedbackRecords || feedbackRecords.length === 0) return;
 
-  const headers = ["Date", "SO Number", "Closure ID", "CCI Code", "CCI Name", "Rating", "Sentiment", "Customer Remarks", "Status"];
+  const headers = ["Date", "SO Number", "Closure ID", "CCI Code", "CCI Name", "Rating", "Sentiment", "Survey Email Received", "Survey Submitted", "Customer Remarks", "Status"];
   const rows = feedbackRecords.map((r) => [
     `"${(r.calling_date || "").replace(/"/g, '""')}"`,
     `"${(r.so_number || "").replace(/"/g, '""')}"`,
@@ -402,6 +411,8 @@ function exportFeedbackCsv() {
     `"${(r.cci_name || "").replace(/"/g, '""')}"`,
     r.customer_rating,
     `"${(r.feedback_category || "").replace(/"/g, '""')}"`,
+    `"${(r.survey_email_received || "").replace(/"/g, '""')}"`,
+    `"${(r.survey_submitted || "").replace(/"/g, '""')}"`,
     `"${(r.customer_remarks || "").replace(/"/g, '""')}"`,
     `"${(r.calling_status || "").replace(/"/g, '""')}"`,
   ]);

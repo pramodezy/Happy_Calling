@@ -215,7 +215,7 @@ async function loadNextClosure(specificSoNumber = null) {
     try {
       const { data: pastAttempts } = await supabase
         .from("happy_calling")
-        .select("calling_status, calling_date, calling_time, customer_remarks, cci_remarks, created_at")
+        .select("calling_status, calling_date, calling_time, customer_remarks, cci_remarks, survey_email_received, survey_submitted, created_at")
         .eq("closure_id", currentClosure.closure_id)
         .order("created_at", { ascending: false });
 
@@ -366,6 +366,8 @@ function renderCallingForm(mount, closure) {
         </div>
         <div style="font-size:0.8125rem; color:var(--text-secondary); margin-top:0.35rem;">
           Last Attempt: <strong>${formatDateTime(latest.created_at || `${latest.calling_date} ${latest.calling_time}`)}</strong>
+          ${latest.survey_email_received ? ` • Survey Email: <strong>${escapeHtml(latest.survey_email_received)}</strong>` : ""}
+          ${latest.survey_submitted ? ` • Survey Submitted: <strong>${escapeHtml(latest.survey_submitted)}</strong>` : ""}
           ${latest.customer_remarks || latest.cci_remarks ? ` • Notes: <em>"${escapeHtml(latest.customer_remarks || latest.cci_remarks)}"</em>` : ""}
         </div>
       </div>
@@ -539,7 +541,52 @@ function renderCallingForm(mount, closure) {
           <input type="hidden" id="form-customer-rating" value="10">
         </div>
 
-        <!-- 4. Customer Remarks -->
+        <!-- 4. Motorola Survey Verification (Mandatory) -->
+        <div class="survey-section-card" id="survey-verification-card">
+          <div class="survey-section-header">
+            <div class="survey-section-title">
+              <span style="width:16px; height:16px; display:inline-flex; color:var(--moto-blue-accent);">${icons.clipboardCheck || icons.checkCircle}</span>
+              <span>Motorola Survey Verification</span>
+            </div>
+            <span class="survey-badge-required">Mandatory</span>
+          </div>
+
+          <div class="survey-grid">
+            <!-- 1. Received Email -->
+            <div class="survey-item-card" id="card-survey-email">
+              <label class="survey-item-label">
+                1. Customer received Motorola Survey Email? <span style="color:var(--status-danger-dot);">*</span>
+              </label>
+              <div class="survey-segmented-control" role="group" aria-label="Customer received Motorola Survey Email">
+                <button type="button" class="survey-toggle-btn yes" data-survey-field="email" data-survey-val="Yes">
+                  <span>✓</span> Yes
+                </button>
+                <button type="button" class="survey-toggle-btn no" data-survey-field="email" data-survey-val="No">
+                  <span>✕</span> No
+                </button>
+              </div>
+              <input type="hidden" id="form-survey-email-received" value="">
+            </div>
+
+            <!-- 2. Submitted Survey -->
+            <div class="survey-item-card" id="card-survey-submitted">
+              <label class="survey-item-label">
+                2. Customer submitted Motorola Survey? <span style="color:var(--status-danger-dot);">*</span>
+              </label>
+              <div class="survey-segmented-control" role="group" aria-label="Customer submitted Motorola Survey">
+                <button type="button" class="survey-toggle-btn yes" data-survey-field="submitted" data-survey-val="Yes">
+                  <span>✓</span> Yes
+                </button>
+                <button type="button" class="survey-toggle-btn no" data-survey-field="submitted" data-survey-val="No">
+                  <span>✕</span> No
+                </button>
+              </div>
+              <input type="hidden" id="form-survey-submitted" value="">
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. Customer Remarks -->
         <div class="form-group">
           <label for="form-customer-remarks" class="form-label">Customer Remarks</label>
           <textarea id="form-customer-remarks" class="form-textarea" rows="2" placeholder="Specific comments made by customer regarding handset, service turnaround, staff behavior..."></textarea>
@@ -627,10 +674,11 @@ function attachFormEvents() {
           c.classList.toggle("selected", c.getAttribute("data-feedback") === "Happy");
         });
         setRatingValue(10);
+        resetSurveySelection();
         if (customerRemarks && !customerRemarks.value) {
           customerRemarks.value = "Customer verified handset repair and expressed full satisfaction.";
         }
-        showToast("Auto-set 10/10 Happy response", "success");
+        showToast("Auto-set 10/10 Happy response (Please confirm survey questions)", "success");
       } else if (action === "quick-ringing") {
         statusSelect.value = "Customer Not Reachable";
         if (completedSection) completedSection.style.display = "none";
@@ -660,14 +708,74 @@ function attachFormEvents() {
           c.classList.toggle("selected", c.getAttribute("data-feedback") === "Unhappy");
         });
         setRatingValue(3);
+        resetSurveySelection();
         if (customerRemarks) {
           customerRemarks.focus();
         }
-        showToast("Auto-set DSAT - please enter customer issue", "warning");
+        showToast("Auto-set DSAT (Please enter issue and confirm survey questions)", "warning");
       }
 
       if (submitBtn) {
         submitBtn.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    });
+  });
+
+  // Motorola Survey Verification Listeners
+  function setSurveyEmail(val) {
+    const emailInput = document.getElementById("form-survey-email-received");
+    const emailCard = document.getElementById("card-survey-email");
+    if (emailInput) emailInput.value = val;
+    if (emailCard) emailCard.classList.remove("has-error");
+
+    document.querySelectorAll('[data-survey-field="email"]').forEach((btn) => {
+      btn.classList.toggle("selected", btn.getAttribute("data-survey-val") === val);
+    });
+
+    // Rule: "Customer received Motorola Survey Email" as No will automatically set "Customer submitted Motorola Survey" to No
+    if (val === "No") {
+      setSurveySubmitted("No");
+    }
+  }
+
+  function setSurveySubmitted(val) {
+    const emailInput = document.getElementById("form-survey-email-received");
+    if (val === "Yes" && emailInput && emailInput.value === "No") {
+      showToast("Customer cannot submit survey if survey email was not received.", "warning");
+      return;
+    }
+
+    const submittedInput = document.getElementById("form-survey-submitted");
+    const submittedCard = document.getElementById("card-survey-submitted");
+    if (submittedInput) submittedInput.value = val;
+    if (submittedCard) submittedCard.classList.remove("has-error");
+
+    document.querySelectorAll('[data-survey-field="submitted"]').forEach((btn) => {
+      btn.classList.toggle("selected", btn.getAttribute("data-survey-val") === val);
+    });
+  }
+
+  function resetSurveySelection() {
+    const emailInput = document.getElementById("form-survey-email-received");
+    const submittedInput = document.getElementById("form-survey-submitted");
+    if (emailInput) emailInput.value = "";
+    if (submittedInput) submittedInput.value = "";
+
+    document.querySelectorAll("[data-survey-field]").forEach((btn) => {
+      btn.classList.remove("selected");
+    });
+    document.getElementById("card-survey-email")?.classList.remove("has-error");
+    document.getElementById("card-survey-submitted")?.classList.remove("has-error");
+  }
+
+  document.querySelectorAll("[data-survey-field]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const field = btn.getAttribute("data-survey-field");
+      const val = btn.getAttribute("data-survey-val");
+      if (field === "email") {
+        setSurveyEmail(val);
+      } else if (field === "submitted") {
+        setSurveySubmitted(val);
       }
     });
   });
@@ -740,10 +848,14 @@ function attachFormEvents() {
 
     let customerRating = null;
     let feedbackCategory = null;
+    let surveyEmailReceived = null;
+    let surveySubmitted = null;
 
     if (callingStatus === "Completed") {
       customerRating = parseInt(ratingInput.value, 10);
       feedbackCategory = feedbackInput.value;
+      surveyEmailReceived = document.getElementById("form-survey-email-received")?.value || null;
+      surveySubmitted = document.getElementById("form-survey-submitted")?.value || null;
 
       if (isNaN(customerRating) || customerRating < 1 || customerRating > 10) {
         showToast("Please provide a customer rating between 1 and 10.", "warning");
@@ -751,6 +863,37 @@ function attachFormEvents() {
       }
       if (!["Happy", "Neutral", "Unhappy"].includes(feedbackCategory)) {
         showToast("Please choose a valid feedback category.", "warning");
+        return;
+      }
+
+      // Mandatory validation for Motorola Survey confirmation fields
+      let hasSurveyError = false;
+      const emailCard = document.getElementById("card-survey-email");
+      const submittedCard = document.getElementById("card-survey-submitted");
+
+      if (!surveyEmailReceived || !["Yes", "No"].includes(surveyEmailReceived)) {
+        if (emailCard) emailCard.classList.add("has-error");
+        hasSurveyError = true;
+      } else {
+        if (emailCard) emailCard.classList.remove("has-error");
+      }
+
+      if (!surveySubmitted || !["Yes", "No"].includes(surveySubmitted)) {
+        if (submittedCard) submittedCard.classList.add("has-error");
+        hasSurveyError = true;
+      } else {
+        if (submittedCard) submittedCard.classList.remove("has-error");
+      }
+
+      if (hasSurveyError) {
+        showToast("Please confirm both Motorola Survey verification questions (Yes/No).", "warning");
+        const surveyCard = document.getElementById("survey-verification-card");
+        if (surveyCard) surveyCard.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+
+      if (surveyEmailReceived === "No" && surveySubmitted === "Yes") {
+        showToast("Customer cannot submit survey if survey email was not received.", "warning");
         return;
       }
     }
@@ -772,6 +915,8 @@ function attachFormEvents() {
         p_feedback_category: feedbackCategory,
         p_customer_remarks: customerRemarks,
         p_cci_remarks: cciRemarks,
+        p_survey_email_received: surveyEmailReceived,
+        p_survey_submitted: surveySubmitted,
       });
 
       if (error) throw error;

@@ -60,9 +60,10 @@ export async function renderCompletedPage(container) {
           { label: "Status" },
           { label: "Rating" },
           { label: "Feedback" },
+          { label: "Survey (Email / Sub)" },
           { label: "Customer Remarks" },
         ],
-        rowsHtml: renderTableSkeleton(8, 7),
+        rowsHtml: renderTableSkeleton(8, 8),
         page: currentPage,
         pageSize: PAGE_SIZE,
         totalRecords: 0,
@@ -137,7 +138,7 @@ export async function loadCompletedTable() {
     if (!records || records.length === 0) {
       rowsHtml = `
         <tr>
-          <td colspan="7" style="text-align:center; padding:2.5rem; color:var(--text-tertiary);">
+          <td colspan="8" style="text-align:center; padding:2.5rem; color:var(--text-tertiary);">
             No completed calling records found.
           </td>
         </tr>
@@ -154,6 +155,14 @@ export async function loadCompletedTable() {
             <td>${renderStatusBadge(row.calling_status)}</td>
             <td>${renderRatingBadge(row.customer_rating)}</td>
             <td>${renderFeedbackBadge(row.feedback_category)}</td>
+            <td>
+              ${row.survey_email_received ? `
+                <div style="display:flex; flex-direction:column; gap:2px; font-size:0.75rem;">
+                  <span>Email: <strong style="color:${row.survey_email_received === 'Yes' ? '#059669' : '#dc2626'}">${escapeHtml(row.survey_email_received)}</strong></span>
+                  <span>Submitted: <strong style="color:${row.survey_submitted === 'Yes' ? '#059669' : '#dc2626'}">${escapeHtml(row.survey_submitted || '—')}</strong></span>
+                </div>
+              ` : '<span style="color:var(--text-tertiary);">—</span>'}
+            </td>
             <td style="max-width:260px; font-size:0.8125rem; color:var(--text-secondary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${escapeHtml(row.customer_remarks || "")}">
               ${escapeHtml(row.customer_remarks || "—")}
             </td>
@@ -172,6 +181,7 @@ export async function loadCompletedTable() {
         { label: "Status" },
         { label: "Rating" },
         { label: "Feedback" },
+        { label: "Survey (Email / Sub)" },
         { label: "Customer Remarks" },
       ],
       rowsHtml,
@@ -247,7 +257,7 @@ async function exportCompletedCallsToCSV() {
       return;
     }
 
-    const headers = ["Closure ID", "SO Number", "CCI Code", "Call Date", "Status", "Rating", "Feedback", "Customer Remarks", "CCI Remarks"];
+    const headers = ["Closure ID", "SO Number", "CCI Code", "Call Date", "Status", "Rating", "Feedback", "Survey Email Received", "Survey Submitted", "Customer Remarks", "CCI Remarks"];
     const csvContent = [
       headers.join(","),
       ...rows.map((r) => [
@@ -258,6 +268,8 @@ async function exportCompletedCallsToCSV() {
         `"${r.calling_status}"`,
         `"${r.customer_rating || ""}"`,
         `"${r.feedback_category || ""}"`,
+        `"${r.survey_email_received || ""}"`,
+        `"${r.survey_submitted || ""}"`,
         `"${(r.customer_remarks || "").replace(/"/g, '""')}"`,
         `"${(r.cci_remarks || "").replace(/"/g, '""')}"`,
       ].join(",")),
