@@ -1480,6 +1480,35 @@ input, select, textarea {
   color: #991b1b;
 }
 
+.btn-quick-chip.selected {
+  border-color: var(--moto-blue-accent);
+  background: var(--moto-blue-light);
+  color: var(--moto-blue-hover);
+  box-shadow: 0 0 0 2px rgba(0, 114, 206, 0.25);
+  font-weight: 700;
+}
+
+.btn-quick-chip.chip-success.selected {
+  border-color: #10b981;
+  background: #ecfdf5;
+  color: #065f46;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+}
+
+.btn-quick-chip.chip-warning.selected {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
+}
+
+.btn-quick-chip.chip-danger.selected {
+  border-color: #ef4444;
+  background: #fef2f2;
+  color: #991b1b;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25);
+}
+
 /* Quick Filter Pills Bar */
 .filter-pills-bar {
   display: flex;

@@ -634,6 +634,14 @@ function attachFormEvents() {
     if (completedSection) {
       completedSection.style.display = isCompleted ? "block" : "none";
     }
+
+    // Unselect quick chips if status dropdown was manually changed
+    document.querySelectorAll("[data-action-chip]").forEach((c) => c.classList.remove("selected"));
+
+    const customerRemarks = document.getElementById("form-customer-remarks");
+    if (!isCompleted && customerRemarks && customerRemarks.value === "Customer verified handset repair and expressed full satisfaction.") {
+      customerRemarks.value = "";
+    }
   });
 
   // 1-Click Inline Copy Listeners
@@ -666,6 +674,10 @@ function attachFormEvents() {
       const cciRemarks = document.getElementById("form-cci-remarks");
       const submitBtn = document.getElementById("btn-submit-call");
 
+      // Highlight the active quick disposition chip
+      document.querySelectorAll("[data-action-chip]").forEach((c) => c.classList.remove("selected"));
+      chip.classList.add("selected");
+
       if (action === "quick-happy") {
         statusSelect.value = "Completed";
         if (completedSection) completedSection.style.display = "block";
@@ -675,29 +687,50 @@ function attachFormEvents() {
         });
         setRatingValue(10);
         resetSurveySelection();
-        if (customerRemarks && !customerRemarks.value) {
+
+        // Dynamically update remarks for Satisfied Customer
+        if (customerRemarks) {
           customerRemarks.value = "Customer verified handset repair and expressed full satisfaction.";
+        }
+        if (cciRemarks) {
+          // Clear any unreachable notes from earlier chip clicks
+          cciRemarks.value = "";
         }
         showToast("Auto-set 10/10 Happy response (Please confirm survey questions)", "success");
       } else if (action === "quick-ringing") {
         statusSelect.value = "Customer Not Reachable";
         if (completedSection) completedSection.style.display = "none";
-        if (cciRemarks && !cciRemarks.value) {
+
+        // Dynamically update remarks for Ringing / No Reply
+        if (cciRemarks) {
           cciRemarks.value = "Customer call placed, phone kept ringing without response.";
+        }
+        if (customerRemarks) {
+          customerRemarks.value = "";
         }
         showToast("Auto-set Ringing / No Reply", "info");
       } else if (action === "quick-switched-off") {
         statusSelect.value = "Customer Not Reachable";
         if (completedSection) completedSection.style.display = "none";
-        if (cciRemarks && !cciRemarks.value) {
+
+        // Dynamically update remarks for Switched Off
+        if (cciRemarks) {
           cciRemarks.value = "Customer number switched off / not reachable on network.";
+        }
+        if (customerRemarks) {
+          customerRemarks.value = "";
         }
         showToast("Auto-set Switched Off", "info");
       } else if (action === "quick-callback") {
         statusSelect.value = "Call Back Required";
         if (completedSection) completedSection.style.display = "none";
-        if (cciRemarks && !cciRemarks.value) {
+
+        // Dynamically update remarks for Call Back
+        if (cciRemarks) {
           cciRemarks.value = "Customer answered and requested a callback at a later time.";
+        }
+        if (customerRemarks) {
+          customerRemarks.value = "";
         }
         showToast("Auto-set Call Back Requested", "info");
       } else if (action === "quick-complaint") {
@@ -709,8 +742,14 @@ function attachFormEvents() {
         });
         setRatingValue(3);
         resetSurveySelection();
+
+        // Dynamically update remarks for DSAT complaint
         if (customerRemarks) {
+          customerRemarks.value = "";
           customerRemarks.focus();
+        }
+        if (cciRemarks) {
+          cciRemarks.value = "Customer reported dissatisfaction during repair verification; escalation required.";
         }
         showToast("Auto-set DSAT (Please enter issue and confirm survey questions)", "warning");
       }

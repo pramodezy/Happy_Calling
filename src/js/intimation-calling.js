@@ -735,36 +735,52 @@ function renderEtrWindow(mount, call) {
       const customerComment = mount.querySelector("#input-customer-comment");
       const submitBtn = mount.querySelector("#btn-submit-intimation");
 
+      // Highlight active intimation disposition chip
+      mount.querySelectorAll("[data-intimation-chip]").forEach((c) => c.classList.remove("selected"));
+      chip.classList.add("selected");
+
       if (action === "quick-agreed") {
         statusRadios.forEach((r) => {
           if (r.value === "Completed") r.checked = true;
         });
-        if (customerComment && !customerComment.value) {
+        if (customerComment) {
           customerComment.value = "Customer verified current repair stage and accepted projected ETR.";
+        }
+        if (cciComment) {
+          cciComment.value = "";
         }
         showToast("Auto-set Customer Agreed to ETR", "success");
       } else if (action === "quick-ringing") {
         statusRadios.forEach((r) => {
           if (r.value === "Customer Not Reachable") r.checked = true;
         });
-        if (cciComment && !cciComment.value) {
+        if (cciComment) {
           cciComment.value = "Call placed to customer, phone kept ringing without response.";
+        }
+        if (customerComment) {
+          customerComment.value = "";
         }
         showToast("Auto-set Ringing / No Reply", "info");
       } else if (action === "quick-switched-off") {
         statusRadios.forEach((r) => {
           if (r.value === "Customer Not Reachable") r.checked = true;
         });
-        if (cciComment && !cciComment.value) {
+        if (cciComment) {
           cciComment.value = "Customer primary mobile switched off / out of coverage.";
+        }
+        if (customerComment) {
+          customerComment.value = "";
         }
         showToast("Auto-set Switched Off", "info");
       } else if (action === "quick-callback") {
         statusRadios.forEach((r) => {
           if (r.value === "Call Back Required") r.checked = true;
         });
-        if (cciComment && !cciComment.value) {
+        if (cciComment) {
           cciComment.value = "Spoke briefly with customer, requested callback later today.";
+        }
+        if (customerComment) {
+          customerComment.value = "";
         }
         showToast("Auto-set Call Back Requested", "info");
       }
