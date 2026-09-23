@@ -42,3 +42,7 @@ Test/
 .venv/
 .agents/
 .antigravity/
+
+# Private local instructions & credentials
+HOW_TO_CHANGE_ADMIN_PASSWORD.txt
+*password_change*.txt
