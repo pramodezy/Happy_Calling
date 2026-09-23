@@ -46,3 +46,5 @@ Test/
 # Private local instructions & credentials
 HOW_TO_CHANGE_ADMIN_PASSWORD.txt
 *password_change*.txt
+supabase_query_instructions*.txt
+*query_instruction*.txt
