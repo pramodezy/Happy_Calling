@@ -470,7 +470,10 @@ function mapAndPreviewRows(rawRows) {
     const rawClosureId = cleanCellVal(detectedClosureIdKey && r[detectedClosureIdKey]);
     const closureId = rawClosureId || soNumber;
 
-    const cciCode = cleanCellVal(detectedCciKey && r[detectedCciKey]).toUpperCase();
+    const rawCciCode = cleanCellVal(detectedCciKey && r[detectedCciKey]).toUpperCase();
+    // Normalize station code (e.g. "062" -> "62", "018" -> "18") to match cci_master
+    let cciCode = rawCciCode.replace(/^0+/, "");
+    if (!cciCode) cciCode = rawCciCode;
     const cciName = cleanCellVal(detectedCciNameKey && r[detectedCciNameKey]) || cciCode;
     const customerName = cleanCellVal(detectedNameKey && r[detectedNameKey]) || "Valued Customer";
     const customerMobile = cleanCellVal(detectedMobileKey && r[detectedMobileKey]) || "N/A";
