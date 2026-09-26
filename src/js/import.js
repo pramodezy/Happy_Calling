@@ -1079,8 +1079,53 @@ async function openRevertBatchModal(batchId, batchName) {
       }
     });
   } catch (err) {
-    closeModal();
     console.error("check_closure_batch_status error:", err);
-    showToast(`Failed to inspect batch: ${formatSupabaseError(err)}`, "error");
+    const errMessage = formatSupabaseError(err);
+    const isPermissionError =
+      err?.message?.includes("permission denied") ||
+      err?.code === "42501" ||
+      errMessage.includes("permission") ||
+      errMessage.includes("Access denied");
+
+    openModal({
+      title: `Batch Inspection Notice`,
+      contentHtml: `
+        <div style="padding:0.5rem 0;">
+          <div style="display:flex; align-items:flex-start; gap:0.75rem; background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:1rem; color:#991b1b;">
+            <span style="width:24px; height:24px; flex-shrink:0;">${icons.alertTriangle}</span>
+            <div>
+              <strong style="font-size:0.95rem;">Unable to Inspect Ingestion Batch</strong>
+              <p style="margin:6px 0 0 0; font-size:0.85rem; color:#b91c1c;">
+                ${escapeHtml(errMessage)}
+              </p>
+              ${
+                isPermissionError
+                  ? `
+                <div style="margin-top:10px; padding:10px; background:#fff; border:1px solid #fca5a5; border-radius:6px; font-size:0.8125rem; color:#7f1d1d;">
+                  <strong>Required Supabase SQL Migration:</strong>
+                  <p style="margin:4px 0 0 0;">
+                    Your database needs migration <code>20260926000013_fix_closure_batch_revert_permissions.sql</code> to grant execute permissions.
+                  </p>
+                  <p style="margin:6px 0 0 0; font-weight:600;">
+                    Please run this SQL in your Supabase Dashboard &rarr; SQL Editor.
+                  </p>
+                </div>
+              `
+                  : ""
+              }
+            </div>
+          </div>
+        </div>
+      `,
+      footerHtml: `
+        <div style="display:flex; justify-content:flex-end; width:100%;">
+          <button type="button" class="btn-secondary" id="btn-modal-close-err">Close</button>
+        </div>
+      `,
+      size: "normal",
+    });
+
+    document.getElementById("btn-modal-close-err")?.addEventListener("click", closeModal);
+    showToast(`Inspection failed: ${errMessage}`, "error");
   }
 }
