@@ -609,9 +609,14 @@ async function executeBatchIngestion(records) {
           total_rows: records.length,
         },
       });
-      if (!bErr && bId) batchId = bId;
+      if (bErr) {
+        console.error("Batch creation failed:", bErr);
+        showToast(`Batch tracking notice: ${formatSupabaseError(bErr)}`, "warning");
+      } else if (bId) {
+        batchId = bId;
+      }
     } catch (bErr) {
-      console.warn("Batch creation notice:", bErr);
+      console.error("Batch creation notice:", bErr);
     }
 
     // Ingest in chunks of 500 records to maintain optimal transaction size
@@ -775,8 +780,12 @@ async function loadImportHistory() {
       .order("created_at", { ascending: false })
       .limit(30);
 
-    // Fallback to legacy audit_log if closure_import_batches is not populated yet or during migration
-    if (error || !batches || batches.length === 0) {
+    if (error) {
+      console.warn("closure_import_batches query warning:", error);
+    }
+
+    // Fallback to legacy audit_log if closure_import_batches has no data yet
+    if (!batches || batches.length === 0) {
       const { data: logs } = await supabase
         .from("audit_log")
         .select("*")
@@ -798,7 +807,10 @@ async function loadImportHistory() {
       historyMount.innerHTML = `
         <div class="table-card">
           <div class="table-card-header">
-            <h3 class="table-card-title">Recent Ingestion Batches</h3>
+            <h3 class="table-card-title">Recent Ingestion Batches (Audit Log)</h3>
+            <p style="font-size:0.8125rem; color:var(--text-secondary); margin-top:2px;">
+              Legacy audit view. Ensure migration 20260926000013 is applied in your Supabase SQL Editor to enable full 1-click batch revert.
+            </p>
           </div>
           <div class="table-responsive-wrapper">
             <table class="data-table">
@@ -1027,9 +1039,9 @@ async function openRevertBatchModal(batchId, batchName) {
       footerHtml: `
         <div style="display:flex; justify-content:flex-end; gap:0.75rem; width:100%;">
           <button type="button" class="btn-secondary" id="btn-cancel-revert">Cancel</button>
-          <button type="button" class="btn-primary" id="btn-execute-revert-confirm" style="background:var(--status-danger-dot); border-color:var(--status-danger-dot);" ${safeToDelete === 0 && totalInMaster === 0 ? "disabled" : ""}>
+          <button type="button" class="btn-primary" id="btn-execute-revert-confirm" style="background:var(--status-danger-dot); border-color:var(--status-danger-dot);">
             <span style="width:16px; height:16px;">${icons.rotateCcw}</span>
-            <span>Confirm Revert (${safeToDelete} Records)</span>
+            <span>${safeToDelete > 0 ? `Confirm Revert (${safeToDelete} Records)` : `Mark Batch as Reverted`}</span>
           </button>
         </div>
       `,
