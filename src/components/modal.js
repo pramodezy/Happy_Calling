@@ -5,12 +5,20 @@
 import { icons } from "../js/utils.js";
 
 let activeModalOverlay = null;
+let closeTimer = null;
 
 export function openModal({ title, contentHtml, footerHtml = "", onClose = null, size = "normal" }) {
-  closeModal();
+  if (closeTimer) {
+    clearTimeout(closeTimer);
+    closeTimer = null;
+  }
+  if (activeModalOverlay) {
+    activeModalOverlay.remove();
+    activeModalOverlay = null;
+  }
 
   const container = document.getElementById("modal-container");
-  if (!container) return;
+  if (!container) return null;
 
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay active";
@@ -34,7 +42,7 @@ export function openModal({ title, contentHtml, footerHtml = "", onClose = null,
   `;
 
   const closeBtn = overlay.querySelector(".modal-close-btn");
-  closeBtn.addEventListener("click", () => {
+  closeBtn?.addEventListener("click", () => {
     closeModal();
     if (typeof onClose === "function") onClose();
   });
@@ -63,14 +71,39 @@ export function openModal({ title, contentHtml, footerHtml = "", onClose = null,
   return overlay;
 }
 
+export function updateModal({ title, contentHtml, footerHtml }) {
+  if (!activeModalOverlay) return false;
+  if (title !== undefined) {
+    const titleEl = activeModalOverlay.querySelector(".modal-title");
+    if (titleEl) titleEl.innerHTML = title;
+  }
+  if (contentHtml !== undefined) {
+    const bodyEl = activeModalOverlay.querySelector(".modal-body");
+    if (bodyEl) bodyEl.innerHTML = contentHtml;
+  }
+  if (footerHtml !== undefined) {
+    let footerEl = activeModalOverlay.querySelector(".modal-footer");
+    if (!footerEl && footerHtml) {
+      footerEl = document.createElement("div");
+      footerEl.className = "modal-footer";
+      activeModalOverlay.querySelector(".modal-dialog")?.appendChild(footerEl);
+    }
+    if (footerEl) footerEl.innerHTML = footerHtml;
+  }
+  return true;
+}
+
 export function closeModal() {
   if (activeModalOverlay) {
-    activeModalOverlay.classList.remove("active");
-    setTimeout(() => {
-      if (activeModalOverlay) {
-        activeModalOverlay.remove();
-        activeModalOverlay = null;
-      }
+    const toRemove = activeModalOverlay;
+    activeModalOverlay = null;
+    toRemove.classList.remove("active");
+    if (closeTimer) {
+      clearTimeout(closeTimer);
+    }
+    closeTimer = setTimeout(() => {
+      toRemove.remove();
+      closeTimer = null;
     }, 150);
   }
 }

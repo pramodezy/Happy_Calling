@@ -1031,8 +1031,6 @@ async function openRevertBatchModal(batchId, batchName) {
       </div>
     `;
 
-    closeModal();
-
     openModal({
       title: `Confirm Revert: ${escapeHtml(batchName)}`,
       contentHtml: modalBody,
