@@ -5,7 +5,7 @@
 
 import * as XLSX from "xlsx";
 import { supabase, formatSupabaseError, fetchAllRows } from "./supabase.js";
-import { icons, escapeHtml, formatDate, formatDateTime, parseFlexibleDate, cleanCellVal } from "./utils.js";
+import { icons, escapeHtml, formatDate, formatDateTime, parseFlexibleDate, detectDatasetDateFormat, cleanCellVal } from "./utils.js";
 import { showToast } from "../components/toast.js";
 import { renderSpinner } from "../components/loading.js";
 
@@ -183,8 +183,8 @@ function handleIncomingOpenCallsFile(file) {
 /**
  * Parse date strings or Excel values into ISO-8601 string (handles 2-digit years, 4-digit years, ISO strings, AM/PM)
  */
-function parseDateTimeVal(rawVal) {
-  return parseFlexibleDate(rawVal, false);
+function parseDateTimeVal(rawVal, formatHint = null) {
+  return parseFlexibleDate(rawVal, false, formatHint);
 }
 
 /**
@@ -241,6 +241,8 @@ function mapAndPreviewOpenCalls(rawRows) {
   const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
   let qualifiedAgeingCount = 0;
 
+  const detectedDateFormat = detectDatasetDateFormat(rawRows, [carryInKey, finishRepairKey]);
+
   parsedCalls = rawRows.map((row, idx) => {
     const rawSo = cleanCellVal(row[soKey]);
     const rawStationCode = cleanCellVal(row[stationCodeKey]);
@@ -248,8 +250,8 @@ function mapAndPreviewOpenCalls(rawRows) {
     let cleanCode = rawStationCode.replace(/^0+/, "");
     if (!cleanCode) cleanCode = rawStationCode;
 
-    const carryInIso = parseDateTimeVal(row[carryInKey]) || new Date().toISOString();
-    const finishRepairIso = parseDateTimeVal(row[finishRepairKey]);
+    const carryInIso = parseDateTimeVal(row[carryInKey], detectedDateFormat) || new Date().toISOString();
+    const finishRepairIso = parseDateTimeVal(row[finishRepairKey], detectedDateFormat);
 
     const carryInDate = new Date(carryInIso);
     const ageingDays = Math.max(0, Math.floor((nowMs - carryInDate.getTime()) / (24 * 60 * 60 * 1000)));

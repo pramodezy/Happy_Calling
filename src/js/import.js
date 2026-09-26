@@ -4,7 +4,7 @@
 
 import * as XLSX from "xlsx";
 import { supabase, formatSupabaseError } from "./supabase.js";
-import { icons, escapeHtml, formatDate, formatDateTime, parseFlexibleDate, cleanCellVal } from "./utils.js";
+import { icons, escapeHtml, formatDate, formatDateTime, parseFlexibleDate, detectDatasetDateFormat, cleanCellVal } from "./utils.js";
 import { showToast } from "../components/toast.js";
 import { renderSpinner } from "../components/loading.js";
 import { openModal, closeModal } from "../components/modal.js";
@@ -227,8 +227,8 @@ function handleIncomingFile(file) {
 /**
  * Safely parse date from Excel/CSV (handles 2-digit years, 4-digit years, ISO strings, AM/PM, and serial dates)
  */
-function parseClosureDate(rawVal) {
-  return parseFlexibleDate(rawVal, true);
+function parseClosureDate(rawVal, formatHint = null) {
+  return parseFlexibleDate(rawVal, true, formatHint);
 }
 
 /**
@@ -458,6 +458,12 @@ function mapAndPreviewRows(rawRows) {
     "repair status"
   );
 
+  const detectedDateFormat = detectDatasetDateFormat(rawRows, [
+    detectedDateKey,
+    detectedRepairCompleteKey,
+    detectedRepairCreationKey,
+  ]);
+
   parsedClosures = rawRows.map((r) => {
     const soNumber = cleanCellVal(detectedSoKey && r[detectedSoKey]);
     // Use detected closure_id, or fall back to SO Number if no separate Closure ID column exists
@@ -472,13 +478,13 @@ function mapAndPreviewRows(rawRows) {
     
     // Extract closure date from "SO Close Time"
     const rawClosureDate = detectedDateKey ? r[detectedDateKey] : null;
-    const closureDateIso = parseClosureDate(rawClosureDate);
+    const closureDateIso = parseClosureDate(rawClosureDate, detectedDateFormat);
 
     const rawCompleteDate = detectedRepairCompleteKey ? r[detectedRepairCompleteKey] : null;
-    const completeDateIso = rawCompleteDate ? parseClosureDate(rawCompleteDate) : null;
+    const completeDateIso = rawCompleteDate ? parseClosureDate(rawCompleteDate, detectedDateFormat) : null;
 
     const rawCreationDate = detectedRepairCreationKey ? r[detectedRepairCreationKey] : null;
-    const creationDateIso = rawCreationDate ? parseClosureDate(rawCreationDate) : null;
+    const creationDateIso = rawCreationDate ? parseClosureDate(rawCreationDate, detectedDateFormat) : null;
 
     const warrantyStatus = detectedWarrantyKey ? cleanCellVal(r[detectedWarrantyKey]) : null;
     const repairType = detectedRepairTypeKey ? cleanCellVal(r[detectedRepairTypeKey]) : null;
@@ -515,7 +521,8 @@ function mapAndPreviewRows(rawRows) {
             Total Rows: <strong>${parsedClosures.length}</strong> | 
             Valid for Ingestion: <strong style="color:var(--status-success-dot);">${validRecords.length}</strong> | 
             Missing Critical IDs: <strong style="color:var(--status-danger-dot);">${invalidRecords.length}</strong> | 
-            Close Date Column: <strong style="color:var(--moto-blue-accent);">${escapeHtml(detectedDateKey || "Not found (Upload Time)")}</strong>
+            Close Date Column: <strong style="color:var(--moto-blue-accent);">${escapeHtml(detectedDateKey || "Not found (Upload Time)")}</strong> |
+            Date Format: <strong style="color:var(--text-primary);">${detectedDateFormat === "MDY" ? "M/D/Y (Motorola CRM)" : detectedDateFormat === "DMY" ? "D/M/Y (Indian)" : "Auto-detected"}</strong>
           </div>
         </div>
 

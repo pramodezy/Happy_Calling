@@ -37,6 +37,7 @@ service-account.json
 
 # Local test data
 Test/
+Closure_Dump*.csv
 
 # Python virtual environment & local AI skills
 .venv/

@@ -45,14 +45,51 @@ export function cleanCellVal(val) {
 }
 
 /**
- * Robust date parser for Motorola CSV/Excel files:
- * 1. DD/MM/YYYY or DD/MM/YY (supports 2-digit years like 10/09/26 19:22 -> 2026)
- * 2. ISO 8601 strings (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS) - Motorola original dump
- * 3. 12-hour format with AM/PM (e.g. "12/09/2026  7:21:00 PM")
- * 4. Excel serial numbers (e.g. 45548.697)
- * 5. JavaScript Date objects
+ * Detect date format ('MDY' vs 'DMY') across a dataset
+ * Scans candidate fields or whole rows to check if day > 12 appears in slot 1 (DMY) or slot 2 (MDY).
  */
-export function parseFlexibleDate(rawVal, fallbackToNow = false) {
+export function detectDatasetDateFormat(rows, sampleFields = []) {
+  if (!rows || !Array.isArray(rows) || rows.length === 0) return null;
+  let mdyEvidence = 0;
+  let dmyEvidence = 0;
+  const regex = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2}|\d{4})/;
+
+  const maxRows = Math.min(rows.length, 300);
+  for (let i = 0; i < maxRows; i++) {
+    const row = rows[i];
+    if (!row) continue;
+    const valuesToCheck = sampleFields.length > 0
+      ? sampleFields.map((k) => k && row[k]).filter(Boolean)
+      : Object.values(row);
+
+    for (const val of valuesToCheck) {
+      if (typeof val !== "string") continue;
+      const m = String(val).trim().match(regex);
+      if (!m) continue;
+      const p1 = parseInt(m[1], 10);
+      const p2 = parseInt(m[2], 10);
+      if (p1 > 12 && p2 <= 12) dmyEvidence++;
+      if (p2 > 12 && p1 <= 12) mdyEvidence++;
+    }
+  }
+
+  if (mdyEvidence > 0 && dmyEvidence === 0) return "MDY";
+  if (dmyEvidence > 0 && mdyEvidence === 0) return "DMY";
+  if (mdyEvidence > dmyEvidence) return "MDY";
+  if (dmyEvidence > mdyEvidence) return "DMY";
+  return null;
+}
+
+/**
+ * Robust date parser for Motorola CSV/Excel files:
+ * 1. ISO 8601 strings (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS) - Motorola original dump
+ * 2. M/D/YY or MM/DD/YYYY (Motorola CRM export standard format)
+ * 3. DD/MM/YYYY or DD/MM/YY (Indian standard & converted Excel formats)
+ * 4. 12-hour format with AM/PM (e.g. "9/23/26  10:41:00 AM", "12/09/2026  7:21:00 PM")
+ * 5. Excel serial numbers (e.g. 45548.697)
+ * 6. JavaScript Date objects
+ */
+export function parseFlexibleDate(rawVal, fallbackToNow = false, formatHint = null) {
   if (rawVal === null || rawVal === undefined || rawVal === "") {
     return fallbackToNow ? new Date().toISOString() : null;
   }
@@ -74,29 +111,7 @@ export function parseFlexibleDate(rawVal, fallbackToNow = false) {
     let trimmed = cleanCellVal(rawVal);
     if (!trimmed) return fallbackToNow ? new Date().toISOString() : null;
 
-    // A. Priority 1: DD/MM/YYYY or DD/MM/YY (Indian standard & Excel local format)
-    // Matches: "10/09/26 19:22", "12/09/26 19:21", "10/09/2026 19:22:55", "12/09/2026  7:21:00 PM", "12-09-2026"
-    const ddmmyyRegex = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2}|\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?(?:\s*(AM|PM))?$/i;
-    const match = trimmed.match(ddmmyyRegex);
-    if (match) {
-      let day = parseInt(match[1], 10);
-      let month = parseInt(match[2], 10) - 1; // 0-indexed month (0 = Jan, 8 = Sep, 11 = Dec)
-      let rawYear = parseInt(match[3], 10);
-      // Auto-expand 2-digit years: 26 -> 2026
-      let year = rawYear < 100 ? (rawYear >= 70 ? 1900 + rawYear : 2000 + rawYear) : rawYear;
-      let hour = match[4] ? parseInt(match[4], 10) : 0;
-      let min = match[5] ? parseInt(match[5], 10) : 0;
-      let sec = match[6] ? parseInt(match[6], 10) : 0;
-      const ampm = match[7] ? match[7].toUpperCase() : null;
-
-      if (ampm === "PM" && hour < 12) hour += 12;
-      if (ampm === "AM" && hour === 12) hour = 0;
-
-      const parsed = new Date(year, month, day, hour, min, sec);
-      if (!isNaN(parsed.getTime())) return parsed.toISOString();
-    }
-
-    // B. Priority 2: YYYY-MM-DD or YYYY/MM/DD with optional time (Motorola CRM default ISO export)
+    // A. Priority 1: YYYY-MM-DD or YYYY/MM/DD with optional time (Motorola CRM default ISO export)
     // Matches: "2026-09-10 19:22:55", "2026-07-30 18:25:23", "2026-09-10"
     const yyyymmddRegex = /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?(?:\s*(AM|PM))?$/i;
     const ymatch = trimmed.match(yyyymmddRegex);
@@ -111,6 +126,49 @@ export function parseFlexibleDate(rawVal, fallbackToNow = false) {
 
       if (ampm === "PM" && hour < 12) hour += 12;
       if (ampm === "AM" && hour === 12) hour = 0;
+
+      const parsed = new Date(year, month, day, hour, min, sec);
+      if (!isNaN(parsed.getTime())) return parsed.toISOString();
+    }
+
+    // B. Priority 2: Slash or Dash format (DD/MM/YYYY or MM/DD/YYYY or 2-digit years)
+    // Matches: "9/23/26 10:41", "23/09/2026", "12/09/2026 7:21:00 PM", "7/25/26 14:12"
+    const slashRegex = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2}|\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?(?:\s*(AM|PM))?$/i;
+    const match = trimmed.match(slashRegex);
+    if (match) {
+      const p1 = parseInt(match[1], 10);
+      const p2 = parseInt(match[2], 10);
+      const rawYear = parseInt(match[3], 10);
+      // Auto-expand 2-digit years: 26 -> 2026
+      const year = rawYear < 100 ? (rawYear >= 70 ? 1900 + rawYear : 2000 + rawYear) : rawYear;
+      let hour = match[4] ? parseInt(match[4], 10) : 0;
+      let min = match[5] ? parseInt(match[5], 10) : 0;
+      let sec = match[6] ? parseInt(match[6], 10) : 0;
+      const ampm = match[7] ? match[7].toUpperCase() : null;
+
+      if (ampm === "PM" && hour < 12) hour += 12;
+      if (ampm === "AM" && hour === 12) hour = 0;
+
+      let day, month;
+      if (p2 > 12 && p1 <= 12) {
+        // Month cannot be > 12! Therefore, p2 is day, p1 is month (MM/DD/YYYY - US/Motorola CRM export)
+        month = p1 - 1;
+        day = p2;
+      } else if (p1 > 12 && p2 <= 12) {
+        // Month cannot be > 12! Therefore, p1 is day, p2 is month (DD/MM/YYYY - Indian standard)
+        day = p1;
+        month = p2 - 1;
+      } else if (formatHint === "MDY") {
+        month = p1 - 1;
+        day = p2;
+      } else if (formatHint === "DMY") {
+        day = p1;
+        month = p2 - 1;
+      } else {
+        // Default when ambiguous and no hint provided (DD/MM/YYYY)
+        day = p1;
+        month = p2 - 1;
+      }
 
       const parsed = new Date(year, month, day, hour, min, sec);
       if (!isNaN(parsed.getTime())) return parsed.toISOString();
