@@ -4,7 +4,7 @@
 
 import { supabase, formatSupabaseError } from "./supabase.js";
 import { getCurrentProfile, isAdmin } from "./auth.js";
-import { formatDateTime, renderStatusBadge, renderFeedbackBadge, renderRatingBadge, escapeHtml, debounce, icons } from "./utils.js";
+import { formatDateTime, renderStatusBadge, renderFeedbackBadge, renderRatingBadge, escapeHtml, debounce, icons, downloadCsvWithBom } from "./utils.js";
 import { renderDataTableWrapper } from "../components/table.js";
 import { renderTableSkeleton } from "../components/loading.js";
 
@@ -275,13 +275,7 @@ async function exportCompletedCallsToCSV() {
       ].join(",")),
     ].join("\n");
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", `Motorola_Happy_Calling_${profile.cci_code || "Records"}_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadCsvWithBom(csvContent, `Motorola_Happy_Calling_${profile.cci_code || "Records"}_${new Date().toISOString().slice(0, 10)}.csv`);
   } catch (e) {
     console.error("Export error:", e);
     alert("Export failed: " + formatSupabaseError(e));

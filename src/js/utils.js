@@ -349,3 +349,26 @@ export const icons = new Proxy(rawIcons, {
     return "";
   },
 });
+
+/**
+ * Triggers a download of a CSV file in the browser with a UTF-8 Byte Order Mark (\uFEFF).
+ * This forces Microsoft Excel to decode the file using UTF-8, correctly preserving
+ * Hindi (Devanagari), regional Indian languages, emojis, and multilingual remarks
+ * without symbolic corruption or mojibake.
+ *
+ * @param {string} csvContent - The raw CSV string content
+ * @param {string} filename - The target filename (e.g. "export.csv")
+ */
+export function downloadCsvWithBom(csvContent, filename) {
+  // Prepend \uFEFF (UTF-8 BOM) so Microsoft Excel identifies encoding as UTF-8
+  const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+

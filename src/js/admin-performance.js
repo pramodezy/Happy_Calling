@@ -5,7 +5,7 @@
 
 import { supabase, formatSupabaseError, subscribeToTable, unsubscribeChannel } from "./supabase.js";
 import { isBSM, getUserAssignedRegions } from "./auth.js";
-import { icons, escapeHtml, renderRatingBadge } from "./utils.js";
+import { icons, escapeHtml, renderRatingBadge, downloadCsvWithBom } from "./utils.js";
 import { renderKpiCard } from "../components/kpi-card.js";
 import { renderSpinner } from "../components/loading.js";
 import Chart from "chart.js/auto";
@@ -663,14 +663,7 @@ function exportPerfCsv() {
   });
 
   const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", `motorola_cci_performance_${new Date().toISOString().split("T")[0]}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  downloadCsvWithBom(csvContent, `motorola_cci_performance_${new Date().toISOString().split("T")[0]}.csv`);
 }
 
 export function cleanupAdminPerformance() {

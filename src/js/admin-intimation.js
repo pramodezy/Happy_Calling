@@ -5,7 +5,7 @@
 
 import { supabase, fetchAllRows } from "./supabase.js";
 import { isAdmin, isBSM, getUserAssignedRegions } from "./auth.js";
-import { icons, escapeHtml, formatDate, formatDateTime } from "./utils.js";
+import { icons, escapeHtml, formatDate, formatDateTime, downloadCsvWithBom } from "./utils.js";
 import { renderSpinner } from "../components/loading.js";
 import { showToast } from "../components/toast.js";
 
@@ -310,14 +310,6 @@ function exportAdminReport() {
   });
 
   const csvContent = [headers.join(","), ...rows].join("\n");
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", `Motorola_Intimation_Station_Report_${new Date().toISOString().slice(0, 10)}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadCsvWithBom(csvContent, `Motorola_Intimation_Station_Report_${new Date().toISOString().slice(0, 10)}.csv`);
   showToast("Station report exported successfully.", "success");
 }

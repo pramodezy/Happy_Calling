@@ -4,7 +4,7 @@
 // ============================================================================
 
 import { supabase, formatSupabaseError, subscribeToTable, unsubscribeChannel } from "./supabase.js";
-import { icons, escapeHtml, renderRatingBadge, renderFeedbackBadge, formatDateTime } from "./utils.js";
+import { icons, escapeHtml, renderRatingBadge, renderFeedbackBadge, formatDateTime, downloadCsvWithBom } from "./utils.js";
 import { renderKpiCard } from "../components/kpi-card.js";
 import { renderSpinner } from "../components/loading.js";
 import Chart from "chart.js/auto";
@@ -447,7 +447,7 @@ function renderFilteredFeedbackTable() {
 function exportFeedbackCsv() {
   if (!feedbackRecords || feedbackRecords.length === 0) return;
 
-  const headers = ["Date", "SO Number", "Closure ID", "CCI Code", "CCI Name", "Rating", "Sentiment", "Survey Email Received", "Survey Submitted", "Customer Remarks", "Status"];
+  const headers = ["Date", "SO Number", "Closure ID", "CCI Code", "CCI Name", "Rating", "Sentiment", "Survey Email Received", "Survey Submitted", "Customer Remarks", "CCI Remarks", "Status"];
   const rows = feedbackRecords.map((r) => [
     `"${(r.calling_date || "").replace(/"/g, '""')}"`,
     `"${(r.so_number || "").replace(/"/g, '""')}"`,
@@ -459,18 +459,12 @@ function exportFeedbackCsv() {
     `"${(r.survey_email_received || "").replace(/"/g, '""')}"`,
     `"${(r.survey_submitted || "").replace(/"/g, '""')}"`,
     `"${(r.customer_remarks || "").replace(/"/g, '""')}"`,
+    `"${(r.cci_remarks || "").replace(/"/g, '""')}"`,
     `"${(r.calling_status || "").replace(/"/g, '""')}"`,
   ]);
 
   const csvContent = [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", `motorola_feedback_logs_${new Date().toISOString().split("T")[0]}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  downloadCsvWithBom(csvContent, `motorola_feedback_logs_${new Date().toISOString().split("T")[0]}.csv`);
 }
 
 export function cleanupAdminFeedback() {

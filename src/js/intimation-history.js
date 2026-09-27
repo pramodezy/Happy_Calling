@@ -5,7 +5,7 @@
 
 import { supabase, formatSupabaseError, fetchAllRows } from "./supabase.js";
 import { getCurrentProfile, isAdmin, hasAdminOrBsmAccess } from "./auth.js";
-import { formatDate, formatDateTime, formatMobile, escapeHtml, debounce, icons } from "./utils.js";
+import { formatDate, formatDateTime, formatMobile, escapeHtml, debounce, icons, downloadCsvWithBom } from "./utils.js";
 import { renderDataTableWrapper } from "../components/table.js";
 import { renderTableSkeleton } from "../components/loading.js";
 
@@ -241,13 +241,7 @@ async function exportIntimationCsv() {
     ]);
 
     const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `Motorola_Intimation_History_${new Date().toISOString().split("T")[0]}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+    downloadCsvWithBom(csvContent, `Motorola_Intimation_History_${new Date().toISOString().split("T")[0]}.csv`);
   } catch (err) {
     console.error("Export error:", err);
     alert("Failed to export intimation history.");
