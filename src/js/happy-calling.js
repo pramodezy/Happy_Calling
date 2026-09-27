@@ -550,14 +550,14 @@ function renderCallingForm(mount, closure) {
           <input type="hidden" id="form-customer-rating" value="10">
         </div>
 
-        <!-- 4. Motorola Survey Verification (Mandatory) -->
+        <!-- 4. Motorola Survey Verification (Mandatory for Happy Customers) -->
         <div class="survey-section-card" id="survey-verification-card">
           <div class="survey-section-header">
             <div class="survey-section-title">
               <span style="width:16px; height:16px; display:inline-flex; color:var(--moto-blue-accent);">${icons.clipboardCheck || icons.checkCircle}</span>
               <span>Motorola Survey Verification</span>
             </div>
-            <span class="survey-badge-required">Mandatory</span>
+            <span class="survey-badge-required">Mandatory for Happy Customers</span>
           </div>
 
           <div class="survey-grid">
@@ -644,6 +644,12 @@ function attachFormEvents() {
       completedSection.style.display = isCompleted ? "block" : "none";
     }
 
+    if (isCompleted) {
+      updateSurveyCardVisibility(feedbackInput ? feedbackInput.value : "Happy");
+    } else {
+      resetSurveySelection();
+    }
+
     // Unselect quick chips if status dropdown was manually changed
     document.querySelectorAll("[data-action-chip]").forEach((c) => c.classList.remove("selected"));
 
@@ -695,7 +701,7 @@ function attachFormEvents() {
           c.classList.toggle("selected", c.getAttribute("data-feedback") === "Happy");
         });
         setRatingValue(10);
-        resetSurveySelection();
+        updateSurveyCardVisibility("Happy");
 
         // Dynamically update remarks for Satisfied Customer
         if (customerRemarks) {
@@ -709,6 +715,7 @@ function attachFormEvents() {
       } else if (action === "quick-ringing") {
         statusSelect.value = "Customer Not Reachable";
         if (completedSection) completedSection.style.display = "none";
+        resetSurveySelection();
 
         // Dynamically update remarks for Ringing / No Reply
         if (cciRemarks) {
@@ -721,6 +728,7 @@ function attachFormEvents() {
       } else if (action === "quick-switched-off") {
         statusSelect.value = "Customer Not Reachable";
         if (completedSection) completedSection.style.display = "none";
+        resetSurveySelection();
 
         // Dynamically update remarks for Switched Off
         if (cciRemarks) {
@@ -733,6 +741,7 @@ function attachFormEvents() {
       } else if (action === "quick-callback") {
         statusSelect.value = "Call Back Required";
         if (completedSection) completedSection.style.display = "none";
+        resetSurveySelection();
 
         // Dynamically update remarks for Call Back
         if (cciRemarks) {
@@ -750,7 +759,7 @@ function attachFormEvents() {
           c.classList.toggle("selected", c.getAttribute("data-feedback") === "Unhappy");
         });
         setRatingValue(3);
-        resetSurveySelection();
+        updateSurveyCardVisibility("Unhappy");
 
         // Dynamically update remarks for DSAT complaint
         if (customerRemarks) {
@@ -760,7 +769,7 @@ function attachFormEvents() {
         if (cciRemarks) {
           cciRemarks.value = "Customer reported dissatisfaction during repair verification; escalation required.";
         }
-        showToast("Auto-set DSAT (Please enter issue and confirm survey questions)", "warning");
+        showToast("Auto-set DSAT / Unhappy feedback", "warning");
       }
 
       if (submitBtn) {
@@ -769,7 +778,18 @@ function attachFormEvents() {
     });
   });
 
-  // Motorola Survey Verification Listeners
+  // Motorola Survey Verification Listeners & Helpers
+  function updateSurveyCardVisibility(category) {
+    const surveyCard = document.getElementById("survey-verification-card");
+    if (!surveyCard) return;
+    if (category === "Happy") {
+      surveyCard.style.display = "block";
+    } else {
+      surveyCard.style.display = "none";
+      resetSurveySelection();
+    }
+  }
+
   function setSurveyEmail(val) {
     const emailInput = document.getElementById("form-survey-email-received");
     const emailCard = document.getElementById("card-survey-email");
@@ -836,6 +856,9 @@ function attachFormEvents() {
       const category = card.getAttribute("data-feedback");
       feedbackInput.value = category;
 
+      // Motorola Survey Verification is ONLY enabled for "Happy" calls
+      updateSurveyCardVisibility(category);
+
       // Auto-suggest rating based on category if currently incompatible
       if (category === "Unhappy" && Number(ratingInput.value) > 6) {
         setRatingValue(4);
@@ -868,6 +891,9 @@ function attachFormEvents() {
       }
     });
   }
+
+  // Initialize Motorola Survey visibility based on default feedback category
+  updateSurveyCardVisibility(feedbackInput ? feedbackInput.value : "Happy");
 
   // Skip button
   document.getElementById("btn-skip-call")?.addEventListener("click", () => {
@@ -902,8 +928,6 @@ function attachFormEvents() {
     if (callingStatus === "Completed") {
       customerRating = parseInt(ratingInput.value, 10);
       feedbackCategory = feedbackInput.value;
-      surveyEmailReceived = document.getElementById("form-survey-email-received")?.value || null;
-      surveySubmitted = document.getElementById("form-survey-submitted")?.value || null;
 
       if (isNaN(customerRating) || customerRating < 1 || customerRating > 10) {
         showToast("Please provide a customer rating between 1 and 10.", "warning");
@@ -914,35 +938,44 @@ function attachFormEvents() {
         return;
       }
 
-      // Mandatory validation for Motorola Survey confirmation fields
-      let hasSurveyError = false;
-      const emailCard = document.getElementById("card-survey-email");
-      const submittedCard = document.getElementById("card-survey-submitted");
+      // Mandatory validation for Motorola Survey confirmation fields ONLY when category is "Happy"
+      if (feedbackCategory === "Happy") {
+        surveyEmailReceived = document.getElementById("form-survey-email-received")?.value || null;
+        surveySubmitted = document.getElementById("form-survey-submitted")?.value || null;
 
-      if (!surveyEmailReceived || !["Yes", "No"].includes(surveyEmailReceived)) {
-        if (emailCard) emailCard.classList.add("has-error");
-        hasSurveyError = true;
+        let hasSurveyError = false;
+        const emailCard = document.getElementById("card-survey-email");
+        const submittedCard = document.getElementById("card-survey-submitted");
+
+        if (!surveyEmailReceived || !["Yes", "No"].includes(surveyEmailReceived)) {
+          if (emailCard) emailCard.classList.add("has-error");
+          hasSurveyError = true;
+        } else {
+          if (emailCard) emailCard.classList.remove("has-error");
+        }
+
+        if (!surveySubmitted || !["Yes", "No"].includes(surveySubmitted)) {
+          if (submittedCard) submittedCard.classList.add("has-error");
+          hasSurveyError = true;
+        } else {
+          if (submittedCard) submittedCard.classList.remove("has-error");
+        }
+
+        if (hasSurveyError) {
+          showToast("Please confirm both Motorola Survey verification questions (Yes/No).", "warning");
+          const surveyCard = document.getElementById("survey-verification-card");
+          if (surveyCard) surveyCard.scrollIntoView({ behavior: "smooth", block: "center" });
+          return;
+        }
+
+        if (surveyEmailReceived === "No" && surveySubmitted === "Yes") {
+          showToast("Customer cannot submit survey if survey email was not received.", "warning");
+          return;
+        }
       } else {
-        if (emailCard) emailCard.classList.remove("has-error");
-      }
-
-      if (!surveySubmitted || !["Yes", "No"].includes(surveySubmitted)) {
-        if (submittedCard) submittedCard.classList.add("has-error");
-        hasSurveyError = true;
-      } else {
-        if (submittedCard) submittedCard.classList.remove("has-error");
-      }
-
-      if (hasSurveyError) {
-        showToast("Please confirm both Motorola Survey verification questions (Yes/No).", "warning");
-        const surveyCard = document.getElementById("survey-verification-card");
-        if (surveyCard) surveyCard.scrollIntoView({ behavior: "smooth", block: "center" });
-        return;
-      }
-
-      if (surveyEmailReceived === "No" && surveySubmitted === "Yes") {
-        showToast("Customer cannot submit survey if survey email was not received.", "warning");
-        return;
+        // For Neutral and Unhappy calls, survey verifications are not applicable
+        surveyEmailReceived = null;
+        surveySubmitted = null;
       }
     }
 
