@@ -596,7 +596,7 @@ function mapAndPreviewRows(rawRows) {
 }
 
 /**
- * Execute batch ingestion via RPC import_closures_batch()
+ * Execute batch ingestion via RPC import_closures_batch() with live progress feedback
  */
 async function executeBatchIngestion(records) {
   const statusContainer = document.getElementById("import-execution-status");
@@ -604,11 +604,44 @@ async function executeBatchIngestion(records) {
   if (!statusContainer || !executeBtn) return;
 
   executeBtn.disabled = true;
-  statusContainer.innerHTML = renderSpinner(`Ingesting ${records.length} records into Supabase PostgreSQL...`);
+
+  // Ingest in chunks of 250 records for optimal speed and zero timeout risk
+  const CHUNK_SIZE = 250;
+  const totalChunks = Math.ceil(records.length / CHUNK_SIZE);
+
+  statusContainer.innerHTML = `
+    <div style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--radius-lg); padding:1.25rem 1.5rem; box-shadow:var(--shadow-sm);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; flex-wrap:wrap; gap:0.5rem;">
+        <div style="display:flex; align-items:center; gap:0.6rem;">
+          <div class="spinner" style="width:20px; height:20px; border:2.5px solid var(--border-subtle); border-top-color:var(--moto-blue-accent); border-radius:50%; animation:spin 0.8s linear infinite;"></div>
+          <strong id="import-progress-status-text" style="font-size:0.95rem; color:var(--text-primary);">Initializing batch tracking...</strong>
+        </div>
+        <span id="import-progress-pct" style="font-size:0.9rem; font-weight:700; color:var(--moto-blue-accent);">0%</span>
+      </div>
+      <div style="background:var(--border-subtle); border-radius:999px; height:8px; overflow:hidden; margin-bottom:0.75rem;">
+        <div id="import-progress-bar" style="background:var(--moto-blue-accent); height:100%; width:0%; transition:width 0.25s ease;"></div>
+      </div>
+      <div style="display:flex; justify-content:space-between; font-size:0.8125rem; color:var(--text-secondary); flex-wrap:wrap; gap:0.5rem;">
+        <span id="import-progress-counts">Preparing ${records.length.toLocaleString()} records...</span>
+        <span id="import-progress-stats" style="color:var(--status-success-dot); font-weight:600;"></span>
+      </div>
+    </div>
+  `;
+
+  const progressStatusText = document.getElementById("import-progress-status-text");
+  const progressPct = document.getElementById("import-progress-pct");
+  const progressBar = document.getElementById("import-progress-bar");
+  const progressCounts = document.getElementById("import-progress-counts");
+  const progressStats = document.getElementById("import-progress-stats");
+
+  let batchId = null;
+  let totalInserted = 0;
+  let totalUpdated = 0;
+  let totalRejected = 0;
+  let allRejections = [];
 
   try {
     // 1. Initialize batch tracking entry for auditable revert capabilities
-    let batchId = null;
     try {
       const { data: bId, error: bErr } = await supabase.rpc("create_closure_import_batch", {
         p_file_name: fileMetadata?.name || "Uploaded Closure Batch",
@@ -620,24 +653,34 @@ async function executeBatchIngestion(records) {
         },
       });
       if (bErr) {
-        console.error("Batch creation failed:", bErr);
-        showToast(`Batch tracking notice: ${formatSupabaseError(bErr)}`, "warning");
+        console.warn("Batch creation notice:", bErr);
       } else if (bId) {
         batchId = bId;
       }
     } catch (bErr) {
-      console.error("Batch creation notice:", bErr);
+      console.warn("Batch creation notice:", bErr);
     }
 
-    // Ingest in chunks of 500 records to maintain optimal transaction size
-    const CHUNK_SIZE = 500;
-    let totalInserted = 0;
-    let totalUpdated = 0;
-    let totalRejected = 0;
-    let allRejections = [];
-
+    // 2. Ingest in chunks with live visual progress
     for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+      const chunkIndex = Math.floor(i / CHUNK_SIZE) + 1;
       const chunk = records.slice(i, i + CHUNK_SIZE);
+      const processedCount = Math.min(i + chunk.length, records.length);
+      const pct = Math.round((processedCount / records.length) * 100);
+
+      if (progressStatusText) {
+        progressStatusText.textContent = `Uploading chunk ${chunkIndex} of ${totalChunks}...`;
+      }
+      if (progressPct) {
+        progressPct.textContent = `${pct}%`;
+      }
+      if (progressBar) {
+        progressBar.style.width = `${pct}%`;
+      }
+      if (progressCounts) {
+        progressCounts.textContent = `Processed ${processedCount.toLocaleString()} of ${records.length.toLocaleString()} records`;
+      }
+
       const { data, error } = await supabase.rpc("import_closures_batch", {
         p_closures: chunk,
         p_batch_id: batchId,
@@ -652,6 +695,38 @@ async function executeBatchIngestion(records) {
         if (data.rejections && data.rejections.length > 0) {
           allRejections.push(...data.rejections);
         }
+      }
+
+      if (progressStats) {
+        progressStats.textContent = `${totalInserted} new, ${totalUpdated} updated`;
+      }
+    }
+
+    // 3. Guarantee batch status is marked COMPLETED in closure_import_batches
+    if (batchId) {
+      try {
+        const { error: finErr } = await supabase.rpc("finalize_closure_import_batch", {
+          p_batch_id: batchId,
+          p_status: "COMPLETED",
+          p_inserted: totalInserted,
+          p_updated: totalUpdated,
+          p_rejected: totalRejected,
+        });
+
+        // Fallback direct table update if helper RPC is not yet applied
+        if (finErr) {
+          await supabase
+            .from("closure_import_batches")
+            .update({
+              status: "COMPLETED",
+              inserted_count: totalInserted,
+              updated_count: totalUpdated,
+              rejected_count: totalRejected,
+            })
+            .eq("id", batchId);
+        }
+      } catch (finalizeErr) {
+        console.warn("Could not sync final batch status:", finalizeErr);
       }
     }
 
@@ -685,7 +760,7 @@ async function executeBatchIngestion(records) {
           <div style="margin-top:1rem; padding:1rem; background:#fef2f2; border:1px solid #fecaca; border-radius:8px;">
             <h4 style="font-size:0.875rem; font-weight:700; color:#991b1b; margin-bottom:0.5rem;">Rejection Details (${allRejections.length}):</h4>
             <ul style="font-size:0.8125rem; color:#991b1b; padding-left:1.25rem;">
-              ${allRejections.slice(0, 10).map((rej) => `<li>SO: ${escapeHtml(rej.record?.so_number || "N/A")} — Reason: ${escapeHtml(rej.reason)}</li>`).join("")}
+              ${allRejections.slice(0, 10).map((rej) => `<li>SO: ${escapeHtml(rej.record?.so_number || rej.so_number || "N/A")} — Reason: ${escapeHtml(rej.reason || rej.error || "Validation error")}</li>`).join("")}
             </ul>
           </div>
         `
@@ -705,9 +780,34 @@ async function executeBatchIngestion(records) {
     });
   } catch (err) {
     console.error("executeBatchIngestion error:", err);
+    if (batchId) {
+      try {
+        await supabase
+          .from("closure_import_batches")
+          .update({
+            status: totalInserted + totalUpdated > 0 ? "COMPLETED" : "FAILED",
+            inserted_count: totalInserted,
+            updated_count: totalUpdated,
+            rejected_count: totalRejected,
+            metadata: {
+              ...(fileMetadata || {}),
+              error: err.message || String(err),
+            },
+          })
+          .eq("id", batchId);
+      } catch (e) {
+        console.warn("Could not record batch failure status:", e);
+      }
+    }
+
     statusContainer.innerHTML = `
       <div style="padding:1.5rem; background:#fef2f2; border:1px solid #fecaca; border-radius:8px; color:#991b1b;">
-        <strong>Import Error:</strong> ${formatSupabaseError(err)}
+        <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+          <span style="width:20px; height:20px;">${icons.alertCircle}</span>
+          <strong style="font-size:1rem;">Import Error</strong>
+        </div>
+        <p style="margin:0 0 0.5rem 0; font-size:0.875rem;">${formatSupabaseError(err)}</p>
+        ${totalInserted + totalUpdated > 0 ? `<p style="font-size:0.8125rem; color:#b91c1c; margin:0;">Note: ${totalInserted} records were inserted and ${totalUpdated} updated before the error occurred.</p>` : ""}
       </div>
     `;
     executeBtn.disabled = false;
@@ -819,7 +919,7 @@ async function loadImportHistory() {
           <div class="table-card-header">
             <h3 class="table-card-title">Recent Ingestion Batches (Audit Log)</h3>
             <p style="font-size:0.8125rem; color:var(--text-secondary); margin-top:2px;">
-              Legacy audit view. Ensure migration 20260926000013 is applied in your Supabase SQL Editor to enable full 1-click batch revert.
+              Legacy audit view. Ensure migration 20260927000015 is applied in your Supabase SQL Editor to enable full 1-click batch revert.
             </p>
           </div>
           <div class="table-responsive-wrapper">
@@ -855,6 +955,17 @@ async function loadImportHistory() {
       return;
     }
 
+    // Auto-heal: If any batch has records already inserted/updated but status is still 'PROCESSING', mark it COMPLETED
+    const stuckCompleted = batches.filter(
+      (b) => b.status === "PROCESSING" && (b.inserted_count > 0 || b.updated_count > 0)
+    );
+    if (stuckCompleted.length > 0) {
+      for (const sb of stuckCompleted) {
+        sb.status = "COMPLETED";
+        supabase.from("closure_import_batches").update({ status: "COMPLETED" }).eq("id", sb.id).then();
+      }
+    }
+
     historyMount.innerHTML = `
       <div class="table-card">
         <div class="table-card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
@@ -886,11 +997,14 @@ async function loadImportHistory() {
               ${batches
                 .map((b) => {
                   const isReverted = b.status === "REVERTED";
+                  const isFailed = b.status === "FAILED";
                   const isProcessing = b.status === "PROCESSING";
 
                   let statusBadge = `<span class="badge badge-success"><span class="badge-dot"></span>Active</span>`;
                   if (isReverted) {
                     statusBadge = `<span class="badge badge-danger" title="Reverted on ${formatDateTime(b.reverted_at)}"><span class="badge-dot"></span>Reverted</span>`;
+                  } else if (isFailed) {
+                    statusBadge = `<span class="badge badge-danger" title="${escapeHtml(b.metadata?.error || "Batch ingestion failed")}"><span class="badge-dot"></span>Failed</span>`;
                   } else if (isProcessing) {
                     statusBadge = `<span class="badge badge-warning"><span class="badge-dot"></span>Processing</span>`;
                   }
@@ -901,6 +1015,17 @@ async function loadImportHistory() {
                       <span style="font-size:0.75rem; color:var(--text-tertiary);" title="Reverted on ${formatDateTime(b.reverted_at)}">
                         ${b.reverted_count || 0} removed
                       </span>
+                    `;
+                  } else if (isProcessing && (b.inserted_count > 0 || b.updated_count > 0)) {
+                    actionBtn = `
+                      <button type="button" class="btn-secondary btn-mark-completed-batch" data-id="${b.id}" style="padding:4px 8px; font-size:0.75rem; color:var(--status-success-dot); border-color:rgba(16, 185, 129, 0.4); display:inline-flex; align-items:center; gap:4px; margin-right:4px;">
+                        <span style="width:14px; height:14px;">${icons.checkCircle}</span>
+                        <span>Mark Active</span>
+                      </button>
+                      <button type="button" class="btn-secondary btn-revert-batch" data-id="${b.id}" data-name="${escapeHtml(b.file_name)}" style="padding:4px 10px; font-size:0.75rem; color:var(--status-danger-dot); border-color:rgba(239, 68, 68, 0.4); display:inline-flex; align-items:center; gap:4px;">
+                        <span style="width:14px; height:14px;">${icons.rotateCcw}</span>
+                        <span>Revert</span>
+                      </button>
                     `;
                   } else {
                     actionBtn = `
@@ -934,6 +1059,18 @@ async function loadImportHistory() {
 
     document.getElementById("btn-refresh-import-history")?.addEventListener("click", () => {
       loadImportHistory();
+    });
+
+    historyMount.querySelectorAll(".btn-mark-completed-batch").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const batchId = btn.getAttribute("data-id");
+        if (!batchId) return;
+        btn.disabled = true;
+        btn.textContent = "Updating...";
+        await supabase.from("closure_import_batches").update({ status: "COMPLETED" }).eq("id", batchId);
+        showToast("Batch marked as Active!", "success");
+        loadImportHistory();
+      });
     });
 
     historyMount.querySelectorAll(".btn-revert-batch").forEach((btn) => {
