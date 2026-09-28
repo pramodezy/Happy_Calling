@@ -2,7 +2,7 @@
 // Completed Calls View Controller
 // ============================================================================
 
-import { supabase, formatSupabaseError } from "./supabase.js";
+import { supabase, formatSupabaseError, fetchAllRows } from "./supabase.js";
 import { getCurrentProfile, isAdmin } from "./auth.js";
 import { formatDateTime, renderStatusBadge, renderFeedbackBadge, renderRatingBadge, escapeHtml, debounce, icons, downloadCsvWithBom } from "./utils.js";
 import { renderDataTableWrapper } from "../components/table.js";
@@ -240,18 +240,28 @@ async function exportCompletedCallsToCSV() {
   if (!profile) return;
 
   try {
-    let query = supabase
-      .from("happy_calling")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(2000);
+    const rows = await fetchAllRows((from, to) => {
+      let query = supabase
+        .from("happy_calling")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .range(from, to);
 
-    if (!isAdmin()) {
-      query = query.eq("cci_code", profile.cci_code);
-    }
+      if (!isAdmin()) {
+        query = query.eq("cci_code", profile.cci_code);
+      }
+      if (statusFilter !== "ALL") {
+        query = query.eq("calling_status", statusFilter);
+      }
+      if (feedbackFilter !== "ALL") {
+        query = query.eq("feedback_category", feedbackFilter);
+      }
+      if (searchQuery) {
+        query = query.or(`so_number.ilike.%${searchQuery}%,closure_id.ilike.%${searchQuery}%,customer_remarks.ilike.%${searchQuery}%`);
+      }
+      return query;
+    });
 
-    const { data: rows, error } = await query;
-    if (error) throw error;
     if (!rows || rows.length === 0) {
       alert("No records to export.");
       return;
