@@ -23,7 +23,7 @@ import { renderAuditPage } from "./audit.js";
 import { renderIntimationCallingPage } from "./intimation-calling.js";
 import { renderIntimationPendingPage } from "./intimation-pending.js";
 import { renderIntimationHistoryPage } from "./intimation-history.js";
-import { renderIntimationPerformancePage } from "./intimation-performance.js";
+import { renderIntimationPerformancePage, cleanupIntimationPerformance } from "./intimation-performance.js";
 import { renderIntimationImportPage } from "./intimation-import.js";
 import { renderAdminIntimationPage } from "./admin-intimation.js";
 import { renderIntimationDashboardPage } from "./intimation-dashboard.js";
@@ -84,6 +84,7 @@ export async function handleRouteChange() {
   cleanupAdminPerformance();
   cleanupAdminAgeing();
   cleanupAdminFeedback();
+  cleanupIntimationPerformance();
 
   let hash = window.location.hash || "";
   if (!hash || hash === "#" || hash === "#/") {

@@ -59,8 +59,12 @@ export async function renderAdminIntimationPage(container) {
           <h3 style="font-size:1.1rem; font-weight:700;">Station-Wise Open Calls &amp; Intimation Backlog</h3>
           <p style="font-size:0.8rem; color:var(--text-secondary);">Stations with service orders exceeding 3-day turnaround threshold</p>
         </div>
-        <div style="display:flex; gap:0.75rem; align-items:center;">
-          <input type="text" id="admin-intimation-search" class="form-input" placeholder="Search Station Code or Name..." style="max-width:260px; padding:6px 12px; font-size:0.85rem;">
+        <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+          <a href="#/intimation/performance" class="btn-secondary" style="padding:6px 12px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;">
+            <span>Performance Rankings</span>
+            <span>&rarr;</span>
+          </a>
+          <input type="text" id="admin-intimation-search" class="form-input" placeholder="Search Station Code, Name, Region..." style="max-width:260px; padding:6px 12px; font-size:0.85rem;">
           <button id="btn-refresh-admin-intimation" class="btn-secondary" style="padding:6px 10px;">
             <span style="width:16px; height:16px;">${icons.refreshCw}</span>
           </button>
@@ -113,6 +117,17 @@ async function loadStationData() {
       (intimations || []).filter((i) => i.calling_status === "Completed").map((i) => i.service_order)
     );
 
+    // Query CCI master for station details, region, and location
+    const cciMasterMap = new Map();
+    try {
+      const { data: cData } = await supabase.from("cci_master").select("cci_code, cci_name, region, location");
+      (cData || []).forEach((c) => {
+        if (c && c.cci_code) cciMasterMap.set(c.cci_code, c);
+      });
+    } catch (e) {
+      console.warn("Unable to load cci_master directory:", e);
+    }
+
     // Group by station
     const stationMap = new Map();
     let totalOpen = 0;
@@ -134,10 +149,13 @@ async function loadStationData() {
 
       const key = call.cci_code || call.station_code || "Unknown";
       if (!stationMap.has(key)) {
+        const meta = cciMasterMap.get(key) || {};
         stationMap.set(key, {
           cci_code: key,
           station_code: call.station_code || key,
-          station_name: call.station_name || `Station ${key}`,
+          station_name: meta.cci_name || call.station_name || `Station ${key}`,
+          region: (meta.region || "Unassigned").trim() || "Unassigned",
+          location: meta.location || "—",
           total_open: 0,
           over_3d: 0,
           intimated: 0,
@@ -157,7 +175,15 @@ async function loadStationData() {
       }
     });
 
-    stationStats = Array.from(stationMap.values()).sort((a, b) => b.over_3d - a.over_3d);
+    let stats = Array.from(stationMap.values()).sort((a, b) => b.over_3d - a.over_3d);
+    if (isBSM()) {
+      const assignedRegions = getUserAssignedRegions();
+      if (assignedRegions && assignedRegions.length > 0) {
+        const assignedSet = new Set(assignedRegions.map((r) => r.trim().toLowerCase()));
+        stats = stats.filter((st) => assignedSet.has((st.region || "").trim().toLowerCase()));
+      }
+    }
+    stationStats = stats;
 
     const complianceRate = totalCriticalOver3d > 0 ? Math.round((totalIntimated / totalCriticalOver3d) * 100) : 100;
 
@@ -223,6 +249,7 @@ function renderStationTableHtml(list) {
           <tr>
             <th>Station Code</th>
             <th>Station Name</th>
+            <th>Region</th>
             <th style="text-align:right;">Active Open</th>
             <th style="text-align:right;">Ageing &gt; 3 Days</th>
             <th style="text-align:right;">Intimations Done</th>
@@ -241,7 +268,9 @@ function renderStationTableHtml(list) {
                 <td style="font-weight:700; color:var(--moto-blue-accent);">${escapeHtml(st.station_code || st.cci_code)}</td>
                 <td>
                   <div style="font-weight:600;">${escapeHtml(st.station_name)}</div>
+                  <div style="font-size:0.75rem; color:var(--text-tertiary);">${escapeHtml(st.location || "—")}</div>
                 </td>
+                <td><span class="badge badge-neutral">${escapeHtml(st.region || "—")}</span></td>
                 <td style="text-align:right; font-weight:600;">${st.total_open}</td>
                 <td style="text-align:right; font-weight:700; color:${st.over_3d > 0 ? '#ef4444' : 'var(--text-secondary)'};">
                   ${st.over_3d}
@@ -281,7 +310,9 @@ function filterStationTable(query) {
   const filtered = stationStats.filter((st) =>
     (st.station_code || "").toLowerCase().includes(q) ||
     (st.station_name || "").toLowerCase().includes(q) ||
-    (st.cci_code || "").toLowerCase().includes(q)
+    (st.cci_code || "").toLowerCase().includes(q) ||
+    (st.region || "").toLowerCase().includes(q) ||
+    (st.location || "").toLowerCase().includes(q)
   );
   renderStationTableHtml(filtered);
 }
@@ -295,12 +326,14 @@ function exportAdminReport() {
     return;
   }
 
-  const headers = ["Station Code", "Station Name", "Total Open", "Ageing > 3 Days", "Intimations Done", "Pending Intimations", "Compliance Pct"];
+  const headers = ["Station Code", "Station Name", "Region", "Location", "Total Open", "Ageing > 3 Days", "Intimations Done", "Pending Intimations", "Compliance Pct"];
   const rows = stationStats.map((st) => {
     const pct = st.over_3d > 0 ? Math.round((st.intimated / st.over_3d) * 100) : 100;
     return [
       `"${st.station_code || st.cci_code}"`,
       `"${(st.station_name || '').replace(/"/g, '""')}"`,
+      `"${(st.region || '').replace(/"/g, '""')}"`,
+      `"${(st.location || '').replace(/"/g, '""')}"`,
       st.total_open,
       st.over_3d,
       st.intimated,
