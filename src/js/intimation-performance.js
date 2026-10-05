@@ -526,8 +526,8 @@ async function loadIntimationPerformanceData(container) {
       </div>
 
       <!-- Regional Performance Summary Section (Same layout as Happy Calling CCI Performance) -->
-      <div class="table-card" style="margin-bottom:1.75rem;">
-        <div class="table-card-header" style="flex-wrap:wrap; gap:0.5rem;">
+      <div class="table-card" style="margin-bottom:1.75rem; overflow:visible;">
+        <div class="table-card-header" style="flex-wrap:wrap; gap:0.5rem; position:relative; z-index:30;">
           <div>
             <h3 class="table-card-title">${isBsmUser ? "Assigned Regional Performance Summary" : "Regional Performance Summary"}</h3>
             <span style="font-size:0.75rem; color:var(--text-tertiary);">Territory-level Intimation coverage rates, on-time ETR compliance, and customer reachability</span>
@@ -567,8 +567,8 @@ async function loadIntimationPerformanceData(container) {
       </div>
 
       <!-- Partner Performance Rankings Section with Region Tagging (Same layout as Happy Calling CCI Performance) -->
-      <div class="table-card">
-        <div class="table-card-header" style="flex-wrap:wrap; gap:0.75rem;">
+      <div class="table-card" style="overflow:visible;">
+        <div class="table-card-header" style="flex-wrap:wrap; gap:0.75rem; position:relative; z-index:20;">
           <div>
             <h3 class="table-card-title">Partner Performance Rankings</h3>
             <span style="font-size:0.75rem; color:var(--text-tertiary);">Real-time ranking based on completed customer intimation and committed ETR resolution</span>

@@ -90,8 +90,8 @@ export async function renderAdminPerformancePage(container) {
     </div>
 
     <!-- Regional Performance Summary Section -->
-    <div class="table-card" style="margin-bottom:1.5rem;">
-      <div class="table-card-header" style="flex-wrap:wrap; gap:0.5rem;">
+    <div class="table-card" style="margin-bottom:1.5rem; overflow:visible;">
+      <div class="table-card-header" style="flex-wrap:wrap; gap:0.5rem; position:relative; z-index:30;">
         <div>
           <h3 class="table-card-title">${isBsmUser ? "Assigned Regional Performance Summary" : "Regional Performance Summary"}</h3>
           <span style="font-size:0.75rem; color:var(--text-tertiary);">Territory-level Happy Calling completion rates, customer CSAT, and Motorola Survey compliance</span>
@@ -132,8 +132,8 @@ export async function renderAdminPerformancePage(container) {
     </div>
 
     <!-- Leaderboard & Table Card -->
-    <div class="table-card">
-      <div class="table-card-header" style="flex-wrap:wrap; gap:0.75rem;">
+    <div class="table-card" style="overflow:visible;">
+      <div class="table-card-header" style="flex-wrap:wrap; gap:0.75rem; position:relative; z-index:20;">
         <div>
           <h3 class="table-card-title">Partner Performance Rankings</h3>
           <span style="font-size:0.75rem; color:var(--text-tertiary);">Real-time ranking based on completed Happy Calling operations</span>
@@ -253,6 +253,8 @@ async function loadPerformanceMetrics() {
   if (!kpiMount) return;
 
   try {
+    const isBsmUser = isBSM();
+    const assignedRegions = getUserAssignedRegions();
     const { data, error } = await supabase.rpc("get_admin_dashboard");
     if (error) throw error;
     if (!data) return;

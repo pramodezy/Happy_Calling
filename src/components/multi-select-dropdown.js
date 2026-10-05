@@ -87,7 +87,7 @@ export function initMultiSelectDropdown({
         const isChecked = selectedSet.has(opt);
         const optId = `${instanceId}_opt_${opt.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
         return `
-          <label class="multi-select-option" for="${optId}">
+          <label class="multi-select-option">
             <input type="checkbox" id="${optId}" value="${escapeHtml(opt)}" ${isChecked ? "checked" : ""}>
             <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(opt)}</span>
           </label>
@@ -159,6 +159,18 @@ export function initMultiSelectDropdown({
       triggerBtn.setAttribute("aria-expanded", "true");
       if (caretEl) caretEl.style.transform = "rotate(180deg)";
       isOpen = true;
+
+      // Smart alignment: if trigger button is near right viewport edge, align to right: 0
+      const rect = triggerBtn.getBoundingClientRect();
+      const dropdownWidth = 260;
+      if (rect.right + 20 > window.innerWidth || rect.left + dropdownWidth > window.innerWidth) {
+        dropdownEl.style.left = "auto";
+        dropdownEl.style.right = "0";
+      } else {
+        dropdownEl.style.left = "0";
+        dropdownEl.style.right = "auto";
+      }
+
       if (searchInput) {
         searchInput.value = "";
         renderOptionsList("");
