@@ -8,20 +8,33 @@ import { isBSM, getUserAssignedRegions } from "./auth.js";
 import { icons, escapeHtml, renderRatingBadge, downloadCsvWithBom } from "./utils.js";
 import { renderKpiCard } from "../components/kpi-card.js";
 import { renderSpinner } from "../components/loading.js";
+import { initMultiSelectDropdown } from "../components/multi-select-dropdown.js";
 import Chart from "chart.js/auto";
 
 let perfCompareChart = null;
 let allCciData = [];
 let surveyByCci = {};
 let searchQuery = "";
-let filterRegion = "";
+let selectedRegionalSummaryRegions = new Set();
+let selectedRankingsRegions = new Set();
+let regionalSummaryDropdown = null;
+let rankingsDropdown = null;
 let filterTier = "ALL";
 let sortBy = "completion_rate"; // completion_rate, total_closures, happy_rate, avg_rating, pending_calls, survey_complete
 let sortOrder = "desc";
 
 export async function renderAdminPerformancePage(container) {
   searchQuery = "";
-  filterRegion = "";
+  selectedRegionalSummaryRegions = new Set();
+  selectedRankingsRegions = new Set();
+  if (regionalSummaryDropdown) {
+    regionalSummaryDropdown.destroy();
+    regionalSummaryDropdown = null;
+  }
+  if (rankingsDropdown) {
+    rankingsDropdown.destroy();
+    rankingsDropdown = null;
+  }
   filterTier = "ALL";
   sortBy = "completion_rate";
   sortOrder = "desc";
@@ -83,9 +96,15 @@ export async function renderAdminPerformancePage(container) {
           <h3 class="table-card-title">${isBsmUser ? "Assigned Regional Performance Summary" : "Regional Performance Summary"}</h3>
           <span style="font-size:0.75rem; color:var(--text-tertiary);">Territory-level Happy Calling completion rates, customer CSAT, and Motorola Survey compliance</span>
         </div>
-        <span class="badge ${isBsmUser ? "badge-warning" : "badge-info"}" style="font-size:0.6875rem; padding:2px 8px;">
-          ${isBsmUser ? "TERRITORY SCOPED" : "NATIONAL BREAKDOWN"}
-        </span>
+        <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-left:auto;">
+          <div id="perf-regional-summary-multiselect-mount"></div>
+          <button type="button" id="btn-perf-regional-summary-reset" class="btn-secondary" style="padding:5px 10px; font-size:0.8125rem;" title="Reset regional filter">
+            <span>Reset</span>
+          </button>
+          <span class="badge ${isBsmUser ? "badge-warning" : "badge-info"}" style="font-size:0.6875rem; padding:2px 8px;">
+            ${isBsmUser ? "TERRITORY SCOPED" : "NATIONAL BREAKDOWN"}
+          </span>
+        </div>
       </div>
 
       <div class="table-responsive-wrapper">
@@ -124,9 +143,7 @@ export async function renderAdminPerformancePage(container) {
         <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
           <input type="text" id="perf-search-input" placeholder="Search CCI code, name, city..." class="form-input" style="padding:5px 10px; font-size:0.8125rem; width:220px;">
           
-          <select id="perf-region-filter" class="filter-select" style="font-size:0.8125rem; padding:5px 10px;">
-            <option value="">${isBSM() ? `All My Regions (${getUserAssignedRegions().join(", ") || "Assigned"})` : "All Regions"}</option>
-          </select>
+          <div id="perf-rankings-multiselect-mount"></div>
 
           <select id="perf-tier-filter" class="filter-select" style="font-size:0.8125rem; padding:5px 10px;">
             <option value="ALL">All Tiers</option>
@@ -144,6 +161,11 @@ export async function renderAdminPerformancePage(container) {
             <option value="avg_rating">Sort: Avg Rating</option>
             <option value="pending_calls">Sort: Pending Calls</option>
           </select>
+
+          <button type="button" id="btn-perf-rankings-reset-all" class="btn-secondary" style="padding:5px 12px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;" title="Reset all filters to default">
+            <span style="width:14px; height:14px;">${icons.refreshCw || ''}</span>
+            <span>Reset All</span>
+          </button>
         </div>
       </div>
 
@@ -179,11 +201,6 @@ export async function renderAdminPerformancePage(container) {
     renderFilteredTable();
   });
 
-  document.getElementById("perf-region-filter")?.addEventListener("change", (e) => {
-    filterRegion = e.target.value;
-    renderFilteredTable();
-  });
-
   document.getElementById("perf-tier-filter")?.addEventListener("change", (e) => {
     filterTier = e.target.value;
     renderFilteredTable();
@@ -191,6 +208,31 @@ export async function renderAdminPerformancePage(container) {
 
   document.getElementById("perf-sort-by")?.addEventListener("change", (e) => {
     sortBy = e.target.value;
+    renderFilteredTable();
+  });
+
+  document.getElementById("btn-perf-regional-summary-reset")?.addEventListener("click", () => {
+    selectedRegionalSummaryRegions.clear();
+    regionalSummaryDropdown?.reset();
+    renderRegionalPerformanceTable();
+  });
+
+  document.getElementById("btn-perf-rankings-reset-all")?.addEventListener("click", () => {
+    searchQuery = "";
+    const searchInput = document.getElementById("perf-search-input");
+    if (searchInput) searchInput.value = "";
+
+    selectedRankingsRegions.clear();
+    rankingsDropdown?.reset();
+
+    filterTier = "ALL";
+    const tierSelect = document.getElementById("perf-tier-filter");
+    if (tierSelect) tierSelect.value = "ALL";
+
+    sortBy = "completion_rate";
+    const sortSelect = document.getElementById("perf-sort-by");
+    if (sortSelect) sortSelect.value = "completion_rate";
+
     renderFilteredTable();
   });
 
@@ -318,33 +360,53 @@ async function loadPerformanceMetrics() {
       })}
     `;
 
-    // Dynamically populate Region options from actual station mapping
-    const regSelect = document.getElementById("perf-region-filter");
-    if (regSelect && regSelect.options.length <= 1) {
-      const isBsmUser = isBSM();
-      const assignedRegions = getUserAssignedRegions();
-      const currentVal = filterRegion;
-      regSelect.innerHTML = `<option value="">${isBsmUser ? `All My Regions (${assignedRegions.join(", ") || "Assigned"})` : "All Regions"}</option>`;
-      
-      let uniqueRegions = [];
-      if (isBsmUser && assignedRegions.length > 0) {
-        uniqueRegions = [...assignedRegions].sort();
-      } else {
-        uniqueRegions = Array.from(
-          new Set(
-            allCciData
-              .map((c) => (c.region || "").trim())
-              .filter((r) => r.length > 0)
-          )
-        ).sort();
-      }
+    // Compute unique regions list
+    let uniqueRegions = [];
+    if (isBsmUser && assignedRegions.length > 0) {
+      uniqueRegions = [...assignedRegions].sort();
+    } else {
+      uniqueRegions = Array.from(
+        new Set(
+          allCciData
+            .map((c) => (c.region || "").trim())
+            .filter((r) => r.length > 0 && r !== "Unassigned")
+        )
+      ).sort();
+    }
 
-      uniqueRegions.forEach((reg) => {
-        const opt = document.createElement("option");
-        opt.value = reg;
-        opt.textContent = reg;
-        if (reg === currentVal) opt.selected = true;
-        regSelect.appendChild(opt);
+    const regPlaceholder = isBsmUser ? `All My Regions (${assignedRegions.join(", ") || "Assigned"})` : "All Regions";
+
+    // 1. Regional Performance Summary Multi-Select Checkbox Dropdown
+    const regSummaryMount = document.getElementById("perf-regional-summary-multiselect-mount");
+    if (regSummaryMount) {
+      if (regionalSummaryDropdown) regionalSummaryDropdown.destroy();
+      regionalSummaryDropdown = initMultiSelectDropdown({
+        container: regSummaryMount,
+        labelPrefix: "Region",
+        defaultPlaceholder: regPlaceholder,
+        options: uniqueRegions,
+        selected: selectedRegionalSummaryRegions,
+        onChange: (selected) => {
+          selectedRegionalSummaryRegions = new Set(selected);
+          renderRegionalPerformanceTable();
+        },
+      });
+    }
+
+    // 2. Partner Performance Rankings Multi-Select Checkbox Dropdown
+    const rankingsMount = document.getElementById("perf-rankings-multiselect-mount");
+    if (rankingsMount) {
+      if (rankingsDropdown) rankingsDropdown.destroy();
+      rankingsDropdown = initMultiSelectDropdown({
+        container: rankingsMount,
+        labelPrefix: "Region",
+        defaultPlaceholder: regPlaceholder,
+        options: uniqueRegions,
+        selected: selectedRankingsRegions,
+        onChange: (selected) => {
+          selectedRankingsRegions = new Set(selected);
+          renderFilteredTable();
+        },
       });
     }
 
@@ -414,13 +476,17 @@ function renderRegionalPerformanceTable() {
     }
   });
 
-  const regions = Object.values(regionalMap).sort((a, b) => b.totalClosures - a.totalClosures);
+  let regions = Object.values(regionalMap).sort((a, b) => b.totalClosures - a.totalClosures);
+
+  if (selectedRegionalSummaryRegions.size > 0) {
+    regions = regions.filter((r) => selectedRegionalSummaryRegions.has(r.region.trim()));
+  }
 
   if (regions.length === 0) {
     tbody.innerHTML = `
       <tr>
         <td colspan="11" style="text-align:center; padding:2rem; color:var(--text-tertiary);">
-          No regional performance data available.
+          No regional performance records match the selected regions.
         </td>
       </tr>
     `;
@@ -541,9 +607,9 @@ function renderFilteredTable() {
     );
   }
 
-  // Region filter
-  if (filterRegion) {
-    filtered = filtered.filter((c) => c.region === filterRegion);
+  // Multi-region filter
+  if (selectedRankingsRegions.size > 0) {
+    filtered = filtered.filter((c) => selectedRankingsRegions.has((c.region || "").trim()));
   }
 
   // Tier filter
@@ -667,6 +733,14 @@ function exportPerfCsv() {
 }
 
 export function cleanupAdminPerformance() {
+  if (regionalSummaryDropdown) {
+    regionalSummaryDropdown.destroy();
+    regionalSummaryDropdown = null;
+  }
+  if (rankingsDropdown) {
+    rankingsDropdown.destroy();
+    rankingsDropdown = null;
+  }
   unsubscribeChannel("admin_perf_realtime");
   if (perfCompareChart) {
     perfCompareChart.destroy();

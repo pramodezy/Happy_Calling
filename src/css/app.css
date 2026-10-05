@@ -1593,6 +1593,157 @@ input, select, textarea {
   background: #ecfdf5;
 }
 
+/* Multi-Select Checkbox Dropdown */
+.multi-select-container {
+  position: relative;
+  display: inline-block;
+}
+
+.multi-select-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 5px 10px;
+  font-size: 0.8125rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: all 0.15s ease;
+  min-height: 31px;
+}
+
+.multi-select-trigger:hover {
+  border-color: var(--moto-blue-accent);
+  background: var(--bg-surface-subtle);
+}
+
+.multi-select-trigger:focus-visible {
+  outline: 2px solid var(--moto-blue-accent);
+}
+
+.multi-select-trigger .trigger-label {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.multi-select-trigger .trigger-count {
+  background: var(--moto-blue-accent);
+  color: #fff;
+  border-radius: 10px;
+  padding: 1px 6px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.multi-select-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 1050;
+  min-width: 230px;
+  max-width: 300px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  padding: 0.5rem;
+  display: none;
+  animation: msFadeIn 0.15s ease-out;
+}
+
+.multi-select-dropdown.open {
+  display: block;
+}
+
+@keyframes msFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.multi-select-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 0.4rem;
+  margin-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.75rem;
+}
+
+.multi-select-action-btn {
+  background: none;
+  border: none;
+  color: var(--moto-blue-accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.multi-select-action-btn:hover {
+  background: var(--moto-blue-light);
+}
+
+.multi-select-search {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.4rem;
+  box-sizing: border-box;
+}
+
+.multi-select-search:focus {
+  outline: none;
+  border-color: var(--moto-blue-accent);
+}
+
+.multi-select-options {
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.multi-select-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+  user-select: none;
+  transition: background 0.1s ease;
+}
+
+.multi-select-option:hover {
+  background: var(--bg-surface-subtle);
+}
+
+.multi-select-option input[type="checkbox"] {
+  accent-color: var(--moto-blue-accent);
+  cursor: pointer;
+  margin: 0;
+}
+
 /* Reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
