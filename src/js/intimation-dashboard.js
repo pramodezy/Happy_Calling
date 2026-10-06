@@ -132,8 +132,23 @@ async function loadIntimationDashboardData(container) {
       return q;
     });
 
-    const totalIntimated = (intimations || []).filter((i) => i.calling_status === "Completed").length;
-    const pendingIntimationCount = Math.max(0, totalCriticalOver3d - totalIntimated);
+    const completedIntimationSet = new Set(
+      (intimations || []).filter((i) => i.calling_status === "Completed").map((i) => i.service_order)
+    );
+
+    // Calculate intimation status specifically for active open critical calls (>3d)
+    let openCriticalIntimated = 0;
+    (openCalls || []).forEach((call) => {
+      const carryMs = new Date(call.carry_in_time).getTime();
+      const ageDays = (nowMs - carryMs) / (24 * 60 * 60 * 1000);
+      if (ageDays > 3) {
+        if (completedIntimationSet.has(call.service_order)) {
+          openCriticalIntimated++;
+        }
+      }
+    });
+
+    const pendingIntimationCount = Math.max(0, totalCriticalOver3d - openCriticalIntimated);
 
     // Query 3: Recent intimations
     let recentQuery = supabase
@@ -160,14 +175,14 @@ async function loadIntimationDashboardData(container) {
           <div class="kpi-subtext">Mandatory customer intimation queue</div>
         </div>
         <div class="kpi-card" style="border-left:4px solid #10b981;">
-          <div class="kpi-label">ETR Intimations Done</div>
-          <div class="kpi-value" style="color:#10b981;">${totalIntimated.toLocaleString()}</div>
-          <div class="kpi-subtext">Customers updated with resolution date</div>
+          <div class="kpi-label">Open Calls Intimated</div>
+          <div class="kpi-value" style="color:#10b981;">${openCriticalIntimated.toLocaleString()}</div>
+          <div class="kpi-subtext">Critical open calls with committed ETR</div>
         </div>
         <div class="kpi-card" style="border-left:4px solid #f59e0b;">
           <div class="kpi-label">Pending Intimations</div>
           <div class="kpi-value" style="color:#f59e0b;">${pendingIntimationCount.toLocaleString()}</div>
-          <div class="kpi-subtext">Calls awaiting agent outreach</div>
+          <div class="kpi-subtext">Critical open calls awaiting outreach</div>
         </div>
       </div>
 

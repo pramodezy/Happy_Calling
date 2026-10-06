@@ -142,9 +142,9 @@ async function loadStationData() {
 
       if (isOver3d) {
         totalCriticalOver3d++;
-      }
-      if (isIntimated) {
-        totalIntimated++;
+        if (isIntimated) {
+          totalIntimated++;
+        }
       }
 
       const key = call.cci_code || call.station_code || "Unknown";
