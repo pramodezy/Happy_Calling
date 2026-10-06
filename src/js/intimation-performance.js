@@ -22,10 +22,8 @@ let networkClosedStats = {};
 let uniqueRegions = [];
 
 let searchQuery = "";
-let selectedRegionalSummaryRegions = new Set();
-let selectedRankingsRegions = new Set();
-let regionalSummaryDropdown = null;
-let rankingsDropdown = null;
+let selectedRegions = new Set();
+let regionDropdown = null;
 let filterTier = "ALL";
 let sortBy = "coverage_rate"; // Default for Open: coverage_rate. For Closed: on_time_rate
 let sortOrder = "desc";
@@ -33,8 +31,11 @@ let sortOrder = "desc";
 export async function renderIntimationPerformancePage(container) {
   searchQuery = "";
   currentViewMode = "OPEN";
-  selectedRegionalSummaryRegions = new Set();
-  selectedRankingsRegions = new Set();
+  selectedRegions = new Set();
+  if (regionDropdown) {
+    regionDropdown.destroy();
+    regionDropdown = null;
+  }
   filterTier = "ALL";
   sortBy = "coverage_rate";
   sortOrder = "desc";
@@ -540,8 +541,8 @@ async function loadIntimationPerformanceData(container) {
             <span id="regional-card-subtitle" style="font-size:0.75rem; color:var(--text-tertiary);"></span>
           </div>
           <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-left:auto;">
-            <div id="perf-regional-summary-multiselect-mount"></div>
-            <button type="button" id="btn-perf-regional-summary-reset" class="btn-secondary" style="padding:5px 10px; font-size:0.8125rem;" title="Reset regional filter">
+            <div id="perf-region-multiselect-mount"></div>
+            <button type="button" id="btn-perf-region-reset" class="btn-secondary" style="padding:5px 10px; font-size:0.8125rem;" title="Reset regional filter">
               <span>Reset</span>
             </button>
             <span class="badge ${isBsmUser ? "badge-warning" : "badge-info"}" style="font-size:0.6875rem; padding:2px 8px;">
@@ -564,15 +565,16 @@ async function loadIntimationPerformanceData(container) {
       <div class="table-card" style="overflow:visible;">
         <div class="table-card-header" style="flex-wrap:wrap; gap:0.75rem; position:relative; z-index:20;">
           <div>
-            <h3 id="rankings-card-title" class="table-card-title">Partner Performance Rankings</h3>
+            <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+              <h3 id="rankings-card-title" class="table-card-title">Partner Performance Rankings</h3>
+              <span id="perf-rankings-region-indicator" style="display:none; font-size:0.75rem; color:var(--moto-blue-accent); background:rgba(0,114,206,0.08); padding:2px 8px; border-radius:4px; border:1px solid rgba(0,114,206,0.2); font-weight:600;"></span>
+            </div>
             <span id="rankings-card-subtitle" style="font-size:0.75rem; color:var(--text-tertiary);"></span>
           </div>
 
           <!-- Filter and Search Toolbar -->
           <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
             <input type="text" id="perf-search-input" placeholder="Search CCI code, name, city..." class="form-input" style="padding:5px 10px; font-size:0.8125rem; width:220px;">
-            
-            <div id="perf-rankings-multiselect-mount"></div>
 
             <select id="perf-tier-filter" class="filter-select" style="font-size:0.8125rem; padding:5px 10px;">
               <option value="ALL">All Tiers</option>
@@ -601,36 +603,21 @@ async function loadIntimationPerformanceData(container) {
       </div>
     `;
 
-    // 1. Initialize Regional Performance Summary Multi-Select Checkbox Dropdown
-    const regSummaryMount = document.getElementById("perf-regional-summary-multiselect-mount");
-    if (regSummaryMount) {
-      if (regionalSummaryDropdown) regionalSummaryDropdown.destroy();
-      regionalSummaryDropdown = initMultiSelectDropdown({
-        container: regSummaryMount,
+    // Single Unified Region Multi-Select Checkbox Dropdown (controls both Regional Summary & Partner Rankings)
+    const regionMount = document.getElementById("perf-region-multiselect-mount");
+    if (regionMount) {
+      if (regionDropdown) regionDropdown.destroy();
+      regionDropdown = initMultiSelectDropdown({
+        container: regionMount,
         labelPrefix: "Region",
         defaultPlaceholder: regPlaceholder,
         options: uniqueRegions,
-        selected: selectedRegionalSummaryRegions,
+        selected: selectedRegions,
         onChange: (selected) => {
-          selectedRegionalSummaryRegions = new Set(selected);
+          selectedRegions = new Set(selected);
           renderRegionalPerformanceTable();
-        },
-      });
-    }
-
-    // 2. Initialize Partner Performance Rankings Multi-Select Checkbox Dropdown
-    const rankingsMount = document.getElementById("perf-rankings-multiselect-mount");
-    if (rankingsMount) {
-      if (rankingsDropdown) rankingsDropdown.destroy();
-      rankingsDropdown = initMultiSelectDropdown({
-        container: rankingsMount,
-        labelPrefix: "Region",
-        defaultPlaceholder: regPlaceholder,
-        options: uniqueRegions,
-        selected: selectedRankingsRegions,
-        onChange: (selected) => {
-          selectedRankingsRegions = new Set(selected);
           renderFilteredTable();
+          updateRegionIndicator();
         },
       });
     }
@@ -651,10 +638,12 @@ async function loadIntimationPerformanceData(container) {
       renderFilteredTable();
     });
 
-    document.getElementById("btn-perf-regional-summary-reset")?.addEventListener("click", () => {
-      selectedRegionalSummaryRegions.clear();
-      regionalSummaryDropdown?.reset();
+    document.getElementById("btn-perf-region-reset")?.addEventListener("click", () => {
+      selectedRegions.clear();
+      regionDropdown?.reset();
       renderRegionalPerformanceTable();
+      renderFilteredTable();
+      updateRegionIndicator();
     });
 
     document.getElementById("btn-perf-rankings-reset-all")?.addEventListener("click", () => {
@@ -662,8 +651,8 @@ async function loadIntimationPerformanceData(container) {
       const searchInput = document.getElementById("perf-search-input");
       if (searchInput) searchInput.value = "";
 
-      selectedRankingsRegions.clear();
-      rankingsDropdown?.reset();
+      selectedRegions.clear();
+      regionDropdown?.reset();
 
       filterTier = "ALL";
       const tierSelect = document.getElementById("perf-tier-filter");
@@ -673,7 +662,9 @@ async function loadIntimationPerformanceData(container) {
       const sortSelect = document.getElementById("perf-sort-by");
       if (sortSelect) sortSelect.value = sortBy;
 
+      renderRegionalPerformanceTable();
       renderFilteredTable();
+      updateRegionIndicator();
     });
 
     // Mode Toggle Handlers
@@ -1179,8 +1170,8 @@ function renderRegionalPerformanceTable() {
     }
   });
 
-  if (selectedRegionalSummaryRegions.size > 0) {
-    regions = regions.filter((r) => selectedRegionalSummaryRegions.has(r.region.trim()));
+  if (selectedRegions.size > 0) {
+    regions = regions.filter((r) => selectedRegions.has(r.region.trim()));
   }
 
   if (regions.length === 0) {
@@ -1298,9 +1289,9 @@ function renderFilteredTable() {
     );
   }
 
-  // Multi-region filter
-  if (selectedRankingsRegions.size > 0) {
-    filtered = filtered.filter((c) => selectedRankingsRegions.has((c.region || "").trim()));
+  // Multi-region filter (Single unified filter)
+  if (selectedRegions.size > 0) {
+    filtered = filtered.filter((c) => selectedRegions.has((c.region || "").trim()));
   }
 
   // Tier filter
@@ -1526,14 +1517,25 @@ function exportIntimationPerfCsv() {
  * Cleanup subscriptions on unmount / route transition
  */
 export function cleanupIntimationPerformance() {
-  if (regionalSummaryDropdown) {
-    regionalSummaryDropdown.destroy();
-    regionalSummaryDropdown = null;
-  }
-  if (rankingsDropdown) {
-    rankingsDropdown.destroy();
-    rankingsDropdown = null;
+  if (regionDropdown) {
+    regionDropdown.destroy();
+    regionDropdown = null;
   }
   unsubscribeChannel("intimation_perf_realtime_calls");
   unsubscribeChannel("intimation_perf_realtime_intimation");
+}
+
+/**
+ * Updates subtle region filter badge in Partner Performance Rankings header
+ */
+function updateRegionIndicator() {
+  const indicator = document.getElementById("perf-rankings-region-indicator");
+  if (!indicator) return;
+  if (selectedRegions.size > 0) {
+    const list = Array.from(selectedRegions);
+    indicator.textContent = `Region: ${list.length <= 2 ? list.join(", ") : `${list.length} selected`}`;
+    indicator.style.display = "inline-flex";
+  } else {
+    indicator.style.display = "none";
+  }
 }

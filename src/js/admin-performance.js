@@ -15,25 +15,18 @@ let perfCompareChart = null;
 let allCciData = [];
 let surveyByCci = {};
 let searchQuery = "";
-let selectedRegionalSummaryRegions = new Set();
-let selectedRankingsRegions = new Set();
-let regionalSummaryDropdown = null;
-let rankingsDropdown = null;
+let selectedRegions = new Set();
+let regionDropdown = null;
 let filterTier = "ALL";
 let sortBy = "completion_rate"; // completion_rate, total_closures, happy_rate, avg_rating, pending_calls, survey_complete
 let sortOrder = "desc";
 
 export async function renderAdminPerformancePage(container) {
   searchQuery = "";
-  selectedRegionalSummaryRegions = new Set();
-  selectedRankingsRegions = new Set();
-  if (regionalSummaryDropdown) {
-    regionalSummaryDropdown.destroy();
-    regionalSummaryDropdown = null;
-  }
-  if (rankingsDropdown) {
-    rankingsDropdown.destroy();
-    rankingsDropdown = null;
+  selectedRegions = new Set();
+  if (regionDropdown) {
+    regionDropdown.destroy();
+    regionDropdown = null;
   }
   filterTier = "ALL";
   sortBy = "completion_rate";
@@ -97,8 +90,8 @@ export async function renderAdminPerformancePage(container) {
           <span style="font-size:0.75rem; color:var(--text-tertiary);">Territory-level Happy Calling completion rates, customer CSAT, and Motorola Survey compliance</span>
         </div>
         <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-left:auto;">
-          <div id="perf-regional-summary-multiselect-mount"></div>
-          <button type="button" id="btn-perf-regional-summary-reset" class="btn-secondary" style="padding:5px 10px; font-size:0.8125rem;" title="Reset regional filter">
+          <div id="perf-region-multiselect-mount"></div>
+          <button type="button" id="btn-perf-region-reset" class="btn-secondary" style="padding:5px 10px; font-size:0.8125rem;" title="Reset regional filter">
             <span>Reset</span>
           </button>
           <span class="badge ${isBsmUser ? "badge-warning" : "badge-info"}" style="font-size:0.6875rem; padding:2px 8px;">
@@ -135,15 +128,16 @@ export async function renderAdminPerformancePage(container) {
     <div class="table-card" style="overflow:visible;">
       <div class="table-card-header" style="flex-wrap:wrap; gap:0.75rem; position:relative; z-index:20;">
         <div>
-          <h3 class="table-card-title">Partner Performance Rankings</h3>
+          <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+            <h3 class="table-card-title">Partner Performance Rankings</h3>
+            <span id="perf-rankings-region-indicator" style="display:none; font-size:0.75rem; color:var(--moto-blue-accent); background:rgba(0,114,206,0.08); padding:2px 8px; border-radius:4px; border:1px solid rgba(0,114,206,0.2); font-weight:600;"></span>
+          </div>
           <span style="font-size:0.75rem; color:var(--text-tertiary);">Real-time ranking based on completed Happy Calling operations</span>
         </div>
 
         <!-- Filter and Search Toolbar -->
         <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
           <input type="text" id="perf-search-input" placeholder="Search CCI code, name, city..." class="form-input" style="padding:5px 10px; font-size:0.8125rem; width:220px;">
-          
-          <div id="perf-rankings-multiselect-mount"></div>
 
           <select id="perf-tier-filter" class="filter-select" style="font-size:0.8125rem; padding:5px 10px;">
             <option value="ALL">All Tiers</option>
@@ -211,10 +205,12 @@ export async function renderAdminPerformancePage(container) {
     renderFilteredTable();
   });
 
-  document.getElementById("btn-perf-regional-summary-reset")?.addEventListener("click", () => {
-    selectedRegionalSummaryRegions.clear();
-    regionalSummaryDropdown?.reset();
+  document.getElementById("btn-perf-region-reset")?.addEventListener("click", () => {
+    selectedRegions.clear();
+    regionDropdown?.reset();
     renderRegionalPerformanceTable();
+    renderFilteredTable();
+    updateRegionIndicator();
   });
 
   document.getElementById("btn-perf-rankings-reset-all")?.addEventListener("click", () => {
@@ -222,8 +218,8 @@ export async function renderAdminPerformancePage(container) {
     const searchInput = document.getElementById("perf-search-input");
     if (searchInput) searchInput.value = "";
 
-    selectedRankingsRegions.clear();
-    rankingsDropdown?.reset();
+    selectedRegions.clear();
+    regionDropdown?.reset();
 
     filterTier = "ALL";
     const tierSelect = document.getElementById("perf-tier-filter");
@@ -233,7 +229,9 @@ export async function renderAdminPerformancePage(container) {
     const sortSelect = document.getElementById("perf-sort-by");
     if (sortSelect) sortSelect.value = "completion_rate";
 
+    renderRegionalPerformanceTable();
     renderFilteredTable();
+    updateRegionIndicator();
   });
 
   document.getElementById("btn-export-cci-perf-csv")?.addEventListener("click", () => {
@@ -378,36 +376,21 @@ async function loadPerformanceMetrics() {
 
     const regPlaceholder = isBsmUser ? `All My Regions (${assignedRegions.join(", ") || "Assigned"})` : "All Regions";
 
-    // 1. Regional Performance Summary Multi-Select Checkbox Dropdown
-    const regSummaryMount = document.getElementById("perf-regional-summary-multiselect-mount");
-    if (regSummaryMount) {
-      if (regionalSummaryDropdown) regionalSummaryDropdown.destroy();
-      regionalSummaryDropdown = initMultiSelectDropdown({
-        container: regSummaryMount,
+    // Single Unified Region Multi-Select Dropdown (controls both Regional Summary & Partner Rankings)
+    const regionMount = document.getElementById("perf-region-multiselect-mount");
+    if (regionMount) {
+      if (regionDropdown) regionDropdown.destroy();
+      regionDropdown = initMultiSelectDropdown({
+        container: regionMount,
         labelPrefix: "Region",
         defaultPlaceholder: regPlaceholder,
         options: uniqueRegions,
-        selected: selectedRegionalSummaryRegions,
+        selected: selectedRegions,
         onChange: (selected) => {
-          selectedRegionalSummaryRegions = new Set(selected);
+          selectedRegions = new Set(selected);
           renderRegionalPerformanceTable();
-        },
-      });
-    }
-
-    // 2. Partner Performance Rankings Multi-Select Checkbox Dropdown
-    const rankingsMount = document.getElementById("perf-rankings-multiselect-mount");
-    if (rankingsMount) {
-      if (rankingsDropdown) rankingsDropdown.destroy();
-      rankingsDropdown = initMultiSelectDropdown({
-        container: rankingsMount,
-        labelPrefix: "Region",
-        defaultPlaceholder: regPlaceholder,
-        options: uniqueRegions,
-        selected: selectedRankingsRegions,
-        onChange: (selected) => {
-          selectedRankingsRegions = new Set(selected);
           renderFilteredTable();
+          updateRegionIndicator();
         },
       });
     }
@@ -415,6 +398,7 @@ async function loadPerformanceMetrics() {
     renderCompareChart(allCciData.slice(0, 12));
     renderRegionalPerformanceTable();
     renderFilteredTable();
+    updateRegionIndicator();
   } catch (err) {
     console.error("loadPerformanceMetrics error:", err);
     if (kpiMount) {
@@ -480,8 +464,8 @@ function renderRegionalPerformanceTable() {
 
   let regions = Object.values(regionalMap).sort((a, b) => b.totalClosures - a.totalClosures);
 
-  if (selectedRegionalSummaryRegions.size > 0) {
-    regions = regions.filter((r) => selectedRegionalSummaryRegions.has(r.region.trim()));
+  if (selectedRegions.size > 0) {
+    regions = regions.filter((r) => selectedRegions.has(r.region.trim()));
   }
 
   if (regions.length === 0) {
@@ -609,9 +593,9 @@ function renderFilteredTable() {
     );
   }
 
-  // Multi-region filter
-  if (selectedRankingsRegions.size > 0) {
-    filtered = filtered.filter((c) => selectedRankingsRegions.has((c.region || "").trim()));
+  // Multi-region filter (Single unified filter)
+  if (selectedRegions.size > 0) {
+    filtered = filtered.filter((c) => selectedRegions.has((c.region || "").trim()));
   }
 
   // Tier filter
@@ -735,17 +719,25 @@ function exportPerfCsv() {
 }
 
 export function cleanupAdminPerformance() {
-  if (regionalSummaryDropdown) {
-    regionalSummaryDropdown.destroy();
-    regionalSummaryDropdown = null;
-  }
-  if (rankingsDropdown) {
-    rankingsDropdown.destroy();
-    rankingsDropdown = null;
+  if (regionDropdown) {
+    regionDropdown.destroy();
+    regionDropdown = null;
   }
   unsubscribeChannel("admin_perf_realtime");
   if (perfCompareChart) {
     perfCompareChart.destroy();
     perfCompareChart = null;
+  }
+}
+
+function updateRegionIndicator() {
+  const indicator = document.getElementById("perf-rankings-region-indicator");
+  if (!indicator) return;
+  if (selectedRegions.size > 0) {
+    const list = Array.from(selectedRegions);
+    indicator.textContent = `Region: ${list.length <= 2 ? list.join(", ") : `${list.length} selected`}`;
+    indicator.style.display = "inline-flex";
+  } else {
+    indicator.style.display = "none";
   }
 }
