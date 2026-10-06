@@ -5,7 +5,7 @@
 
 import { supabase, formatSupabaseError, subscribeToTable, unsubscribeChannel } from "./supabase.js";
 import { isBSM, getUserAssignedRegions } from "./auth.js";
-import { icons, escapeHtml, renderRatingBadge, downloadCsvWithBom } from "./utils.js";
+import { icons, escapeHtml, renderRatingBadge, downloadCsvWithBom, exportElementToPng } from "./utils.js";
 import { renderKpiCard } from "../components/kpi-card.js";
 import { renderSpinner } from "../components/loading.js";
 import { initMultiSelectDropdown } from "../components/multi-select-dropdown.js";
@@ -83,7 +83,7 @@ export async function renderAdminPerformancePage(container) {
     </div>
 
     <!-- Regional Performance Summary Section -->
-    <div class="table-card" style="margin-bottom:1.5rem; overflow:visible;">
+    <div id="perf-regional-card" class="table-card" style="margin-bottom:1.5rem; overflow:visible;">
       <div class="table-card-header" style="flex-wrap:wrap; gap:0.5rem; position:relative; z-index:30;">
         <div>
           <h3 class="table-card-title">${isBsmUser ? "Assigned Regional Performance Summary" : "Regional Performance Summary"}</h3>
@@ -93,6 +93,10 @@ export async function renderAdminPerformancePage(container) {
           <div id="perf-region-multiselect-mount"></div>
           <button type="button" id="btn-perf-region-reset" class="btn-secondary" style="padding:5px 10px; font-size:0.8125rem;" title="Reset regional filter">
             <span>Reset</span>
+          </button>
+          <button type="button" id="btn-export-regional-png" class="btn-secondary" style="padding:5px 12px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;" title="Export Regional Performance Summary as PNG image">
+            <span style="width:14px; height:14px;">${icons.image}</span>
+            <span>Export PNG</span>
           </button>
           <span class="badge ${isBsmUser ? "badge-warning" : "badge-info"}" style="font-size:0.6875rem; padding:2px 8px;">
             ${isBsmUser ? "TERRITORY SCOPED" : "NATIONAL BREAKDOWN"}
@@ -125,7 +129,7 @@ export async function renderAdminPerformancePage(container) {
     </div>
 
     <!-- Leaderboard & Table Card -->
-    <div class="table-card" style="overflow:visible;">
+    <div id="perf-rankings-card" class="table-card" style="overflow:visible;">
       <div class="table-card-header" style="flex-wrap:wrap; gap:0.75rem; position:relative; z-index:20;">
         <div>
           <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
@@ -155,6 +159,11 @@ export async function renderAdminPerformancePage(container) {
             <option value="avg_rating">Sort: Avg Rating</option>
             <option value="pending_calls">Sort: Pending Calls</option>
           </select>
+
+          <button type="button" id="btn-export-rankings-png" class="btn-secondary" style="padding:5px 12px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;" title="Export Partner Rankings as PNG image">
+            <span style="width:14px; height:14px;">${icons.image}</span>
+            <span>Export PNG</span>
+          </button>
 
           <button type="button" id="btn-perf-rankings-reset-all" class="btn-secondary" style="padding:5px 12px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;" title="Reset all filters to default">
             <span style="width:14px; height:14px;">${icons.refreshCw || ''}</span>
@@ -232,6 +241,34 @@ export async function renderAdminPerformancePage(container) {
     renderRegionalPerformanceTable();
     renderFilteredTable();
     updateRegionIndicator();
+  });
+
+  document.getElementById("btn-export-regional-png")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<span style="font-size:0.8125rem;">Exporting...</span>`;
+    try {
+      const regTag = selectedRegions.size > 0 ? `_${Array.from(selectedRegions).join("_").toLowerCase()}` : "";
+      await exportElementToPng("#perf-regional-card", `motorola_regional_performance${regTag}_${new Date().toISOString().split("T")[0]}.png`);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = origHtml;
+    }
+  });
+
+  document.getElementById("btn-export-rankings-png")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<span style="font-size:0.8125rem;">Exporting...</span>`;
+    try {
+      const regTag = selectedRegions.size > 0 ? `_${Array.from(selectedRegions).join("_").toLowerCase()}` : "";
+      await exportElementToPng("#perf-rankings-card", `motorola_partner_rankings${regTag}_${new Date().toISOString().split("T")[0]}.png`);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = origHtml;
+    }
   });
 
   document.getElementById("btn-export-cci-perf-csv")?.addEventListener("click", () => {
@@ -577,10 +614,10 @@ function renderCompareChart(cciList) {
   });
 }
 
-function renderFilteredTable() {
-  const tbody = document.getElementById("perf-table-body");
-  if (!tbody) return;
-
+/**
+ * Returns filtered and sorted rankings list respecting active search, region, and tier filters
+ */
+function getFilteredRankingsList() {
   let filtered = [...allCciData];
 
   // Search filter
@@ -623,6 +660,15 @@ function renderFilteredTable() {
     const valB = Number(b[sortBy]) || 0;
     return sortOrder === "desc" ? valB - valA : valA - valB;
   });
+
+  return filtered;
+}
+
+function renderFilteredTable() {
+  const tbody = document.getElementById("perf-table-body");
+  if (!tbody) return;
+
+  const filtered = getFilteredRankingsList();
 
   if (filtered.length === 0) {
     tbody.innerHTML = `
@@ -691,10 +737,14 @@ function renderFilteredTable() {
 }
 
 function exportPerfCsv() {
-  if (!allCciData || allCciData.length === 0) return;
+  const filtered = getFilteredRankingsList();
+  if (!filtered || filtered.length === 0) {
+    alert("No records match your filter criteria to export.");
+    return;
+  }
 
   const headers = ["Rank", "CCI Code", "CCI Name", "Region", "Location", "Total Closures", "Completed Calls", "Pending Calls", "Completion Rate (%)", "Happy Rate (%)", "DSAT Rate (%)", "Survey Email Rate (%)", "Survey Complete Rate (%)", "Avg Rating"];
-  const rows = allCciData.map((c, idx) => {
+  const rows = filtered.map((c, idx) => {
     const sInfo = surveyByCci[c.cci_code];
     return [
       idx + 1,
@@ -714,8 +764,9 @@ function exportPerfCsv() {
     ];
   });
 
+  const regSuffix = selectedRegions.size > 0 ? `_${Array.from(selectedRegions).join("_").toLowerCase()}` : "";
   const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-  downloadCsvWithBom(csvContent, `motorola_cci_performance_${new Date().toISOString().split("T")[0]}.csv`);
+  downloadCsvWithBom(csvContent, `motorola_cci_performance${regSuffix}_${new Date().toISOString().split("T")[0]}.csv`);
 }
 
 export function cleanupAdminPerformance() {

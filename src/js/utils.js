@@ -338,6 +338,7 @@ const rawIcons = {
   filter: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>`,
   clipboardCheck: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect><path d="m9 14 2 2 4-4"></path></svg>`,
   mail: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path></svg>`,
+  image: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg>`,
 };
 
 // Wrap in safe Proxy so any missing icon returns an empty string instead of undefined
@@ -370,5 +371,56 @@ export function downloadCsvWithBom(csvContent, filename) {
   link.click();
   document.body.removeChild(link);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * Captures an HTML element or card and triggers a PNG download.
+ * Loads html2canvas dynamically to preserve initial page load performance.
+ *
+ * @param {HTMLElement|string} target - DOM element or selector string
+ * @param {string} filename - Target file name (e.g. "regional_performance.png")
+ * @param {Object} options - Custom html2canvas options
+ */
+export async function exportElementToPng(target, filename, options = {}) {
+  const element = typeof target === "string" ? document.querySelector(target) : target;
+  if (!element) {
+    console.error("exportElementToPng: Target element not found:", target);
+    return;
+  }
+
+  // Temporarily expand scrollable table containers to ensure full width capture
+  const scrollWrappers = element.querySelectorAll(".table-responsive-wrapper");
+  const origStyles = [];
+  scrollWrappers.forEach((sw) => {
+    origStyles.push({ el: sw, overflow: sw.style.overflow, maxWidth: sw.style.maxWidth });
+    sw.style.overflow = "visible";
+  });
+
+  try {
+    const html2canvas = (await import("html2canvas")).default;
+    const canvas = await html2canvas(element, {
+      scale: 2, // 2x high resolution
+      useCORS: true,
+      logging: false,
+      backgroundColor: options.backgroundColor || "#ffffff",
+      windowWidth: Math.max(element.scrollWidth, document.documentElement.clientWidth, 1200),
+      ...options,
+    });
+
+    const link = document.createElement("a");
+    link.download = filename.endsWith(".png") ? filename : `${filename}.png`;
+    link.href = canvas.toDataURL("image/png");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } catch (err) {
+    console.error("Failed to export PNG:", err);
+    alert("Unable to generate PNG image. Please try again.");
+  } finally {
+    origStyles.forEach(({ el, overflow, maxWidth }) => {
+      el.style.overflow = overflow;
+      el.style.maxWidth = maxWidth;
+    });
+  }
 }
 

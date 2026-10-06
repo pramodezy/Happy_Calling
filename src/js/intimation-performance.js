@@ -8,7 +8,7 @@
 
 import { supabase, fetchAllRows, subscribeToTable, unsubscribeChannel, formatSupabaseError } from "./supabase.js";
 import { getCurrentProfile, isAdmin, isBSM, hasAdminOrBsmAccess, getUserAssignedRegions } from "./auth.js";
-import { icons, escapeHtml, formatDate, formatDateTime, downloadCsvWithBom } from "./utils.js";
+import { icons, escapeHtml, formatDate, formatDateTime, downloadCsvWithBom, exportElementToPng } from "./utils.js";
 import { renderSpinner } from "../components/loading.js";
 import { renderKpiCard } from "../components/kpi-card.js";
 import { initMultiSelectDropdown } from "../components/multi-select-dropdown.js";
@@ -534,7 +534,7 @@ async function loadIntimationPerformanceData(container) {
       <div id="perf-details-mount" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:1.5rem; margin-bottom:1.75rem;"></div>
 
       <!-- Regional Performance Summary Section -->
-      <div class="table-card" style="margin-bottom:1.75rem; overflow:visible;">
+      <div id="perf-regional-card" class="table-card" style="margin-bottom:1.75rem; overflow:visible;">
         <div class="table-card-header" style="flex-wrap:wrap; gap:0.5rem; position:relative; z-index:30;">
           <div>
             <h3 id="regional-card-title" class="table-card-title">${isBsmUser ? "Assigned Regional Performance Summary" : "Regional Performance Summary"}</h3>
@@ -544,6 +544,10 @@ async function loadIntimationPerformanceData(container) {
             <div id="perf-region-multiselect-mount"></div>
             <button type="button" id="btn-perf-region-reset" class="btn-secondary" style="padding:5px 10px; font-size:0.8125rem;" title="Reset regional filter">
               <span>Reset</span>
+            </button>
+            <button type="button" id="btn-export-regional-png" class="btn-secondary" style="padding:5px 12px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;" title="Export Regional Performance Summary as PNG image">
+              <span style="width:14px; height:14px;">${icons.image}</span>
+              <span>Export PNG</span>
             </button>
             <span class="badge ${isBsmUser ? "badge-warning" : "badge-info"}" style="font-size:0.6875rem; padding:2px 8px;">
               ${isBsmUser ? "TERRITORY SCOPED" : "NATIONAL BREAKDOWN"}
@@ -562,7 +566,7 @@ async function loadIntimationPerformanceData(container) {
       </div>
 
       <!-- Partner Performance Rankings Section with Region Tagging -->
-      <div class="table-card" style="overflow:visible;">
+      <div id="perf-rankings-card" class="table-card" style="overflow:visible;">
         <div class="table-card-header" style="flex-wrap:wrap; gap:0.75rem; position:relative; z-index:20;">
           <div>
             <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
@@ -584,6 +588,11 @@ async function loadIntimationPerformanceData(container) {
             </select>
 
             <select id="perf-sort-by" class="filter-select" style="font-size:0.8125rem; padding:5px 10px;"></select>
+
+            <button type="button" id="btn-export-rankings-png" class="btn-secondary" style="padding:5px 12px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;" title="Export Partner Performance Rankings as PNG image">
+              <span style="width:14px; height:14px;">${icons.image}</span>
+              <span>Export PNG</span>
+            </button>
 
             <button type="button" id="btn-perf-rankings-reset-all" class="btn-secondary" style="padding:5px 12px; font-size:0.8125rem; display:flex; align-items:center; gap:0.35rem;" title="Reset all filters to default">
               <span style="width:14px; height:14px;">${icons.refreshCw || ''}</span>
@@ -665,6 +674,36 @@ async function loadIntimationPerformanceData(container) {
       renderRegionalPerformanceTable();
       renderFilteredTable();
       updateRegionIndicator();
+    });
+
+    document.getElementById("btn-export-regional-png")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const origHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<span style="font-size:0.8125rem;">Exporting...</span>`;
+      try {
+        const modeTag = currentViewMode.toLowerCase();
+        const regTag = selectedRegions.size > 0 ? `_${Array.from(selectedRegions).join("_").toLowerCase()}` : "";
+        await exportElementToPng("#perf-regional-card", `motorola_intimation_regional_${modeTag}${regTag}_${new Date().toISOString().split("T")[0]}.png`);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+      }
+    });
+
+    document.getElementById("btn-export-rankings-png")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const origHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<span style="font-size:0.8125rem;">Exporting...</span>`;
+      try {
+        const modeTag = currentViewMode.toLowerCase();
+        const regTag = selectedRegions.size > 0 ? `_${Array.from(selectedRegions).join("_").toLowerCase()}` : "";
+        await exportElementToPng("#perf-rankings-card", `motorola_intimation_rankings_${modeTag}${regTag}_${new Date().toISOString().split("T")[0]}.png`);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+      }
     });
 
     // Mode Toggle Handlers
@@ -1268,12 +1307,9 @@ function renderRegionalPerformanceTable() {
 }
 
 /**
- * Render Filtered Partner Performance Rankings Table
+ * Returns filtered and sorted station list respecting active search, region, and tier filters
  */
-function renderFilteredTable() {
-  const tbody = document.getElementById("perf-table-body");
-  if (!tbody) return;
-
+function getFilteredStationList() {
   const rawList = currentViewMode === "OPEN" ? allStationOpenData : allStationClosedData;
   let filtered = [...rawList];
 
@@ -1320,6 +1356,18 @@ function renderFilteredTable() {
     const valB = Number(b[sortBy]) || 0;
     return sortOrder === "desc" ? valB - valA : valA - valB;
   });
+
+  return filtered;
+}
+
+/**
+ * Render Filtered Partner Performance Rankings Table
+ */
+function renderFilteredTable() {
+  const tbody = document.getElementById("perf-table-body");
+  if (!tbody) return;
+
+  const filtered = getFilteredStationList();
 
   if (filtered.length === 0) {
     tbody.innerHTML = `
@@ -1437,12 +1485,18 @@ function renderFilteredTable() {
 }
 
 /**
- * Export Partner Performance Rankings to CSV (Adapts based on current view mode)
+ * Export Partner Performance Rankings to CSV (Respects current active filters and view mode)
  */
 function exportIntimationPerfCsv() {
-  if (currentViewMode === "OPEN") {
-    if (!allStationOpenData || allStationOpenData.length === 0) return;
+  const filtered = getFilteredStationList();
+  if (!filtered || filtered.length === 0) {
+    alert("No records match your filter criteria to export.");
+    return;
+  }
 
+  const regSuffix = selectedRegions.size > 0 ? `_${Array.from(selectedRegions).join("_").toLowerCase()}` : "";
+
+  if (currentViewMode === "OPEN") {
     const headers = [
       "Rank",
       "CCI Code",
@@ -1458,7 +1512,7 @@ function exportIntimationPerfCsv() {
       "Customer Reachability (%)",
     ];
 
-    const rows = allStationOpenData.map((st, idx) => [
+    const rows = filtered.map((st, idx) => [
       idx + 1,
       `"${(st.cci_code || st.station_code || "").replace(/"/g, '""')}"`,
       `"${(st.cci_name || "").replace(/"/g, '""')}"`,
@@ -1474,10 +1528,8 @@ function exportIntimationPerfCsv() {
     ]);
 
     const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-    downloadCsvWithBom(csvContent, `motorola_open_calls_intimation_progress_${new Date().toISOString().split("T")[0]}.csv`);
+    downloadCsvWithBom(csvContent, `motorola_open_calls_intimation_progress${regSuffix}_${new Date().toISOString().split("T")[0]}.csv`);
   } else {
-    if (!allStationClosedData || allStationClosedData.length === 0) return;
-
     const headers = [
       "Rank",
       "CCI Code",
@@ -1493,7 +1545,7 @@ function exportIntimationPerfCsv() {
       "Multi-ETA Rate (%)",
     ];
 
-    const rows = allStationClosedData.map((st, idx) => [
+    const rows = filtered.map((st, idx) => [
       idx + 1,
       `"${(st.cci_code || st.station_code || "").replace(/"/g, '""')}"`,
       `"${(st.cci_name || "").replace(/"/g, '""')}"`,
@@ -1509,7 +1561,7 @@ function exportIntimationPerfCsv() {
     ]);
 
     const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-    downloadCsvWithBom(csvContent, `motorola_closed_calls_intimation_audit_${new Date().toISOString().split("T")[0]}.csv`);
+    downloadCsvWithBom(csvContent, `motorola_closed_calls_intimation_audit${regSuffix}_${new Date().toISOString().split("T")[0]}.csv`);
   }
 }
 
