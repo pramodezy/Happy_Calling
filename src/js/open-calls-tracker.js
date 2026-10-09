@@ -234,13 +234,13 @@ export async function renderOpenCallsTrackerPage(container) {
           <span style="width:8px; height:8px; border-radius:50%; background:#10b981;" id="statusPulse"></span>
           <span id="statusText" style="color:var(--text-secondary);">Connecting to database...</span>
         </div>
-        <button id="btn-refresh-tracker" class="btn-secondary" style="padding:6px 12px; font-size:0.8125rem;">
-          <span style="width:14px; height:14px;">${icons.refreshCw}</span>
+        <button id="btn-refresh-tracker" class="btn-secondary" style="padding:6px 12px; font-size:0.8125rem; display:inline-flex; align-items:center; gap:6px; height:34px; line-height:1;">
+          <span style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; flex-shrink:0;">${icons.refreshCw}</span>
           <span>Refresh Live</span>
         </button>
         ${admin ? `
-          <a href="#/intimation/import" class="btn-primary" style="padding:6px 14px; font-size:0.8125rem;">
-            <span>${icons.upload}</span>
+          <a href="#/intimation/import" class="btn-primary" style="padding:6px 14px; font-size:0.8125rem; display:inline-flex; align-items:center; gap:6px; height:34px; line-height:1;">
+            <span style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; flex-shrink:0;">${icons.upload}</span>
             <span>Upload New Snapshot</span>
           </a>
         ` : ""}
@@ -515,11 +515,11 @@ function renderTrackerDashboardDOM(container) {
     <section class="crm-panel p-5 bg-white space-y-3" style="background:#fff; border:1px solid var(--border-subtle); border-radius:var(--radius-lg); padding:1.25rem;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; flex-wrap:wrap; gap:0.5rem;">
         <h3 style="font-size:0.875rem; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:0.5rem; margin:0;">
-          <span>${icons.filter}</span>
+          <span style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; flex-shrink:0;">${icons.filter}</span>
           <span>Multi-Select Operational Filters</span>
         </h3>
-        <button id="resetFiltersBtn" type="button" class="btn-secondary" style="font-size:0.75rem; padding:4px 10px;">
-          <span>${icons.rotateCcw}</span>
+        <button id="resetFiltersBtn" type="button" class="btn-secondary" style="font-size:0.75rem; padding:4px 10px; display:inline-flex; align-items:center; gap:5px; height:28px; line-height:1;">
+          <span style="display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px; flex-shrink:0;">${icons.rotateCcw}</span>
           <span>Reset All Filters</span>
         </button>
       </div>
@@ -617,8 +617,8 @@ function renderTrackerDashboardDOM(container) {
       </div>
 
       <div style="display:flex; align-items:center; gap:0.5rem;">
-        <button id="exportCsvBtn" class="btn-primary" style="background:#059669; border-color:#047857; font-size:0.75rem; padding:6px 12px; gap:0.35rem;">
-          <span>${icons.download}</span>
+        <button id="exportCsvBtn" class="btn-primary" style="background:#059669; border-color:#047857; font-size:0.75rem; padding:6px 12px; display:inline-flex; align-items:center; gap:6px; height:30px; line-height:1;">
+          <span style="display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px; flex-shrink:0;">${icons.download}</span>
           <span>Export 4-Sheet Workbook (.xlsx)</span>
         </button>
       </div>
@@ -819,7 +819,7 @@ function renderTabActions(targetId) {
 
   if (targetId === "tab-hierarchy") {
     container.innerHTML = `
-      <button id="btn-toggle-tree" class="btn-secondary" style="font-size:0.75rem; padding:4px 10px; font-family:monospace;">
+      <button id="btn-toggle-tree" class="btn-secondary" style="font-size:0.75rem; padding:4px 10px; font-family:monospace; display:inline-flex; align-items:center; gap:4px; height:28px; line-height:1;">
         <span>${isPivotExpanded ? "– Collapse All" : "+ Expand All"}</span>
       </button>
     `;
@@ -831,7 +831,7 @@ function renderTabActions(targetId) {
     });
   } else if (targetId === "tab-station") {
     container.innerHTML = `
-      <button id="btn-toggle-station-tree" class="btn-secondary" style="font-size:0.75rem; padding:4px 10px; font-family:monospace;">
+      <button id="btn-toggle-station-tree" class="btn-secondary" style="font-size:0.75rem; padding:4px 10px; font-family:monospace; display:inline-flex; align-items:center; gap:4px; height:28px; line-height:1;">
         <span>${isPivotStationExpanded ? "– Collapse All" : "+ Expand All"}</span>
       </button>
     `;
