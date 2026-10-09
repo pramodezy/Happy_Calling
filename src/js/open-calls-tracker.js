@@ -510,6 +510,14 @@ function initFilterSchemas() {
  * Render the static Shell HTML of the Tracker Viewport
  */
 function renderTrackerDashboardDOM(container) {
+  const admin = isAdmin();
+  const bsm = isBSM();
+  const exportBtnLabel = admin
+    ? "Export 4-Sheet Workbook (.xlsx)"
+    : bsm
+    ? "Export 3-Sheet Workbook (.xlsx)"
+    : "Export Workbook (.xlsx)";
+
   container.innerHTML = `
     <!-- 🔍 Multi-Select Filters Section -->
     <section class="crm-panel p-5 bg-white space-y-3" style="background:#fff; border:1px solid var(--border-subtle); border-radius:var(--radius-lg); padding:1.25rem;">
@@ -619,7 +627,7 @@ function renderTrackerDashboardDOM(container) {
       <div style="display:flex; align-items:center; gap:0.5rem;">
         <button id="exportCsvBtn" class="btn-primary" style="background:#059669; border-color:#047857; font-size:0.75rem; padding:6px 12px; display:inline-flex; align-items:center; gap:6px; height:30px; line-height:1;">
           <span style="display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px; flex-shrink:0;">${icons.download}</span>
-          <span>Export 4-Sheet Workbook (.xlsx)</span>
+          <span>${exportBtnLabel}</span>
         </button>
       </div>
     </section>
@@ -684,12 +692,16 @@ function renderTrackerDashboardDOM(container) {
           <button class="view-tab active" data-target="tab-consolidated">
             Consolidated Pivot
           </button>
-          <button class="view-tab" data-target="tab-hierarchy">
-            Regional Tree Pivot
-          </button>
-          <button class="view-tab" data-target="tab-station">
-            Station Matrix Pivot
-          </button>
+          ${admin || bsm ? `
+            <button class="view-tab" data-target="tab-hierarchy">
+              Regional Tree Pivot
+            </button>
+          ` : ""}
+          ${admin ? `
+            <button class="view-tab" data-target="tab-station">
+              Station Matrix Pivot
+            </button>
+          ` : ""}
           <button class="view-tab" data-target="tab-raw">
             Master Ticket Registry
           </button>
@@ -704,15 +716,19 @@ function renderTrackerDashboardDOM(container) {
           <div class="pivot-viewport" id="pivotAgeingContainer"></div>
         </div>
 
-        <!-- Tab 2: Regional Hierarchy Pivot -->
-        <div id="tab-hierarchy" class="tab-pane" style="display:none;">
-          <div class="pivot-viewport" id="pivotHierarchicalContainer"></div>
-        </div>
+        <!-- Tab 2: Regional Hierarchy Pivot (Admin & BSM only) -->
+        ${admin || bsm ? `
+          <div id="tab-hierarchy" class="tab-pane" style="display:none;">
+            <div class="pivot-viewport" id="pivotHierarchicalContainer"></div>
+          </div>
+        ` : ""}
 
-        <!-- Tab 3: Station Matrix Pivot -->
-        <div id="tab-station" class="tab-pane" style="display:none;">
-          <div class="pivot-viewport" id="pivotStationContainer"></div>
-        </div>
+        <!-- Tab 3: Station Matrix Pivot (Admin only) -->
+        ${admin ? `
+          <div id="tab-station" class="tab-pane" style="display:none;">
+            <div class="pivot-viewport" id="pivotStationContainer"></div>
+          </div>
+        ` : ""}
 
         <!-- Tab 4: Master Raw Record Table -->
         <div id="tab-raw" class="tab-pane" style="display:none; display:flex; flex-direction:column; gap:0.75rem;">
@@ -958,13 +974,19 @@ function getFilteredReportData() {
  */
 function applyGlobalFiltersAndRender() {
   const filteredData = getFilteredReportData();
+  const admin = isAdmin();
+  const bsm = isBSM();
 
   calculateKPIMetrics(filteredData);
   renderAgeingChart(filteredData);
   calculateSLACompliance(filteredData);
   renderAgeingPivot(filteredData);
-  renderHierarchicalPivot(filteredData);
-  renderStationPivot(filteredData);
+  if (admin || bsm) {
+    renderHierarchicalPivot(filteredData);
+  }
+  if (admin) {
+    renderStationPivot(filteredData);
+  }
   renderMasterTableUI(filteredData);
 }
 
@@ -1618,6 +1640,9 @@ function exportToExcel() {
     return;
   }
 
+  const admin = isAdmin();
+  const bsm = isBSM();
+
   try {
     const wb = XLSX.utils.book_new();
 
@@ -1626,15 +1651,19 @@ function exportToExcel() {
     const ws1 = XLSX.utils.aoa_to_sheet(pivot1AOA);
     XLSX.utils.book_append_sheet(wb, ws1, "Consolidated Pivot");
 
-    // 2. Regional Hierarchy
-    const pivot2AOA = buildHierarchicalPivotSheet(filteredData);
-    const ws2 = XLSX.utils.aoa_to_sheet(pivot2AOA);
-    XLSX.utils.book_append_sheet(wb, ws2, "Regional Hierarchy");
+    // 2. Regional Hierarchy (Admin and BSM)
+    if (admin || bsm) {
+      const pivot2AOA = buildHierarchicalPivotSheet(filteredData);
+      const ws2 = XLSX.utils.aoa_to_sheet(pivot2AOA);
+      XLSX.utils.book_append_sheet(wb, ws2, "Regional Hierarchy");
+    }
 
-    // 3. Station Matrix
-    const pivot3AOA = buildStationPivotSheet(filteredData);
-    const ws3 = XLSX.utils.aoa_to_sheet(pivot3AOA);
-    XLSX.utils.book_append_sheet(wb, ws3, "Station Matrix");
+    // 3. Station Matrix (Admin only)
+    if (admin) {
+      const pivot3AOA = buildStationPivotSheet(filteredData);
+      const ws3 = XLSX.utils.aoa_to_sheet(pivot3AOA);
+      XLSX.utils.book_append_sheet(wb, ws3, "Station Matrix");
+    }
 
     // 4. Master Open Calls
     const columnsToLoad = [
