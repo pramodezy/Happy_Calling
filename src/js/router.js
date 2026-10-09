@@ -27,6 +27,7 @@ import { renderIntimationPerformancePage, cleanupIntimationPerformance } from ".
 import { renderIntimationImportPage } from "./intimation-import.js";
 import { renderAdminIntimationPage } from "./admin-intimation.js";
 import { renderIntimationDashboardPage } from "./intimation-dashboard.js";
+import { renderOpenCallsTrackerPage } from "./open-calls-tracker.js";
 import { showToast } from "../components/toast.js";
 import { getActiveWorkspace } from "./workspace.js";
 import { escapeHtml, formatDateTime, icons } from "./utils.js";
@@ -60,6 +61,8 @@ const routes = {
 
   // Intimation Calling Routes
   "#/intimation/dashboard": { render: renderIntimationDashboardPage, requiresAuth: true },
+  "#/intimation/tracker": { render: renderOpenCallsTrackerPage, requiresAuth: true },
+  "#/intimation/open-calls-tracker": { render: renderOpenCallsTrackerPage, requiresAuth: true },
   "#/intimation/calling": { render: renderIntimationCallingPage, requiresAuth: true },
   "#/intimation/pending": { render: renderIntimationPendingPage, requiresAuth: true },
   "#/intimation/history": { render: renderIntimationHistoryPage, requiresAuth: true },

@@ -1791,3 +1791,224 @@ input, select, textarea {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ============================================================================
+   MOTOROLA OPEN CALLS OPERATIONS TRACKER & PIVOT MATRIX
+   ============================================================================ */
+
+.pivot-viewport {
+  position: relative;
+  overflow: auto;
+  max-height: 600px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.pivot-viewport table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+
+.pivot-viewport th,
+.pivot-viewport td,
+#masterTable th,
+#masterTable td {
+  font-size: 0.8125rem;
+  padding: 8px 12px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.pivot-viewport thead th,
+#masterTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background-color: var(--bg-surface-subtle);
+  color: var(--text-secondary);
+  font-family: monospace;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.7rem;
+  border-bottom: 1px solid var(--border-medium);
+}
+
+.pivot-viewport .sticky-col-1 {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background-color: var(--bg-surface);
+  min-width: 220px;
+  max-width: 320px;
+  border-right: 2px solid var(--border-subtle);
+}
+
+.pivot-viewport .sticky-col-1-header {
+  position: sticky;
+  left: 0;
+  z-index: 15;
+  background-color: var(--bg-surface-subtle);
+  color: var(--text-primary);
+  min-width: 220px;
+  max-width: 320px;
+  border-right: 2px solid var(--border-medium);
+}
+
+.pivot-viewport .grand-total-col {
+  background-color: var(--bg-surface-subtle) !important;
+  font-weight: 700;
+  color: var(--moto-blue-accent) !important;
+  font-family: monospace;
+  border-left: 2px solid var(--border-subtle);
+}
+
+.pivot-viewport .grand-total-row {
+  background-color: #f1f5f9 !important;
+  font-weight: 700;
+  font-family: monospace;
+}
+
+.pivot-viewport .grand-total-row td {
+  border-top: 2px solid var(--border-medium);
+  color: var(--text-primary) !important;
+}
+
+.pivot-viewport .parent-row {
+  background-color: var(--bg-surface-subtle) !important;
+  font-weight: 700;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.pivot-viewport .parent-row:hover {
+  background-color: #e2e8f0 !important;
+}
+
+.pivot-viewport .sub-parent-row {
+  background-color: var(--bg-surface) !important;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.pivot-viewport .sub-parent-row:hover {
+  background-color: #f8fafc !important;
+}
+
+.pivot-viewport .child-row {
+  padding-left: 24px !important;
+}
+
+.pivot-viewport .deep-child-row {
+  padding-left: 40px !important;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+/* Custom Dropdown for Multi-Select Filters */
+.filter-dropdown {
+  position: relative;
+}
+
+.select-btn-style {
+  width: 100%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 0.75rem;
+  font-family: monospace;
+  color: var(--text-primary);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.15s ease;
+}
+
+.select-btn-style:hover {
+  border-color: var(--moto-blue-accent);
+}
+
+.custom-dropdown-content {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  min-width: 180px;
+  z-index: 50;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  margin-top: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 8px;
+}
+
+.custom-dropdown-content.show {
+  display: block;
+}
+
+.filter-item-label:hover {
+  background: var(--bg-surface-subtle);
+}
+
+/* Quick Queue Filter Buttons */
+.queue-btn {
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: monospace;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.queue-btn:hover {
+  background: var(--bg-surface-subtle);
+  color: var(--text-primary);
+}
+
+.queue-btn.active {
+  background: var(--text-primary);
+  color: #fff;
+  border-color: var(--text-primary);
+}
+
+/* Viewport Navigation Tabs */
+.view-tab {
+  padding: 8px 14px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  border-top-left-radius: var(--radius-md);
+  border-top-right-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.view-tab:hover {
+  color: var(--text-primary);
+}
+
+.view-tab.active {
+  background: var(--bg-surface);
+  border-color: var(--border-subtle);
+  border-bottom-color: var(--bg-surface);
+  color: var(--moto-blue-accent);
+  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.03);
+}
+

@@ -52,6 +52,7 @@ export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0
 
   // Intimation Calling workspace navigation
   const intimationCciNav = [
+    { path: "#/intimation/tracker", label: "Open Calls Tracker", icon: icons.zap },
     { path: "#/intimation/dashboard", label: "Intimation Overview", icon: icons.dashboard },
     { path: "#/intimation/calling", label: "ETR Calling Window", icon: icons.phone, badge: ">3d ETR" },
     { path: "#/intimation/pending", label: "Open Calls Backlog", icon: icons.clock },
@@ -62,6 +63,7 @@ export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0
 
   const intimationBsmNav = [
     { section: "Intimation Analytics" },
+    { path: "#/intimation/tracker", label: "Open Calls Tracker", icon: icons.zap },
     { path: "#/intimation/admin", label: "Regional Intimation", icon: icons.dashboard },
     { path: "#/intimation/dashboard", label: "Intimation Overview", icon: icons.smile },
     { path: "#/intimation/performance", label: "Regional Performance", icon: icons.award },
@@ -72,6 +74,7 @@ export function renderSidebar(currentPath = "#/dashboard", pendingBadgeCount = 0
 
   const intimationAdminNav = [
     { section: "Intimation Analytics" },
+    { path: "#/intimation/tracker", label: "Open Calls Tracker", icon: icons.zap },
     { path: "#/intimation/admin", label: "Intimation Admin", icon: icons.dashboard },
     { path: "#/intimation/dashboard", label: "Intimation Overview", icon: icons.smile },
     { path: "#/intimation/performance", label: "CCI Performance", icon: icons.award },

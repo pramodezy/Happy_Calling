@@ -21,7 +21,11 @@ export async function renderIntimationDashboardPage(container) {
           Customer resolution intimation for Service Orders exceeding the 3-day turnaround threshold.
         </p>
       </div>
-      <div style="display:flex; gap:0.75rem;">
+      <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+        <a href="#/intimation/tracker" class="btn-secondary">
+          <span>${icons.zap}</span>
+          <span>Open Calls Tracker</span>
+        </a>
         ${admin ? `
           <a href="#/intimation/import" class="btn-secondary">
             <span>${icons.upload}</span>

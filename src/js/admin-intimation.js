@@ -34,6 +34,10 @@ export async function renderAdminIntimationPage(container) {
         </p>
       </div>
       <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <a href="#/intimation/tracker" class="btn-secondary">
+          <span>${icons.zap}</span>
+          <span>Open Calls Tracker</span>
+        </a>
         ${isAdmin() ? `
           <a href="#/intimation/import" class="btn-primary">
             <span>${icons.upload}</span>

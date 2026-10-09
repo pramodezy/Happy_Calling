@@ -222,6 +222,22 @@ function mapAndPreviewOpenCalls(rawRows) {
   const stateKey = findKey(sample, "State", "Province");
   const cityKey = findKey(sample, "City", "Location");
 
+  // Operational Tracker extended fields
+  const soSubmittedKey = findKey(sample, "SO Submitted Time", "SOSubmittedTime", "Submitted Time", "Submission Time");
+  const applyPartsKey = findKey(sample, "Apply for Parts Time", "ApplyPartsTime", "Parts Applied Time", "Part Apply Time");
+  const partsInCciKey = findKey(sample, "Parts in CCI Time", "PartsInCCITime", "Parts In CCI");
+  const partsInCountryKey = findKey(sample, "Parts Available in Country Time", "PartsAvailableInCountryTime");
+  const partsInHubKey = findKey(sample, "Parts Available in ASP Hub Time", "PartsAvailableInASPHubTime");
+  const imei1Key = findKey(sample, "IMEI1", "IMEI 1", "IMEI");
+  const imei2Key = findKey(sample, "IMEI2", "IMEI 2");
+  const snKey = findKey(sample, "SN", "Serial Number", "Serial No", "SerialNumber");
+  const cidKey = findKey(sample, "CID Status", "CID");
+  const txCodeKey = findKey(sample, "Transaction Code", "TransactionCode");
+  const repCodeKey = findKey(sample, "Repair Code", "RepairCode");
+  const repDescKey = findKey(sample, "Repair Code Description", "RepairCodeDescription", "Repair Description");
+  const repTypeKey = findKey(sample, "Repair Type", "RepairType");
+  const serviceTypeKey = findKey(sample, "Service Type", "ServiceType");
+
   if (!soKey || !stationCodeKey) {
     previewArea.innerHTML = `
       <div style="padding:1.25rem; background:#fef2f2; border:1px solid #fecaca; border-radius:var(--radius-lg); color:#991b1b;">
@@ -241,7 +257,7 @@ function mapAndPreviewOpenCalls(rawRows) {
   const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
   let qualifiedAgeingCount = 0;
 
-  const detectedDateFormat = detectDatasetDateFormat(rawRows, [carryInKey, finishRepairKey]);
+  const detectedDateFormat = detectDatasetDateFormat(rawRows, [carryInKey, finishRepairKey, soSubmittedKey]);
 
   parsedCalls = rawRows.map((row, idx) => {
     const rawSo = cleanCellVal(row[soKey]);
@@ -282,6 +298,20 @@ function mapAndPreviewOpenCalls(rawRows) {
         region: cleanCellVal(row[regionKey]),
         state: cleanCellVal(row[stateKey]),
         city: cleanCellVal(row[cityKey]),
+        so_submitted_time: cleanCellVal(row[soSubmittedKey]),
+        apply_for_parts_time: cleanCellVal(row[applyPartsKey]),
+        parts_in_cci_time: cleanCellVal(row[partsInCciKey]),
+        parts_available_in_country_time: cleanCellVal(row[partsInCountryKey]),
+        parts_available_in_asp_hub_time: cleanCellVal(row[partsInHubKey]),
+        imei1: cleanCellVal(row[imei1Key]),
+        imei2: cleanCellVal(row[imei2Key]),
+        sn: cleanCellVal(row[snKey]),
+        cid_status: cleanCellVal(row[cidKey]),
+        transaction_code: cleanCellVal(row[txCodeKey]),
+        repair_code: cleanCellVal(row[repCodeKey]),
+        repair_code_description: cleanCellVal(row[repDescKey]),
+        repair_type: cleanCellVal(row[repTypeKey]),
+        service_type: cleanCellVal(row[serviceTypeKey]),
       },
     };
   }).filter((c) => c.service_order && c.cci_code);
